@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.local
+.DS_Store
+*.log
+.vscode/
+.idea/
+DOCKER_DEPLOY.md
+
+# Uploads (garder la structure mais pas les fichiers)
+public/uploads/*
+!public/uploads/.gitkeep
+

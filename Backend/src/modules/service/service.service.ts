@@ -1,0 +1,207 @@
+import { prisma } from '../../lib/prisma';
+
+export class ServiceService {
+  async getServices(tenantId: string, category?: string, search?: string) {
+    const where: any = { tenantId };
+    
+    if (category && category !== 'all') {
+      where.category = category;
+    }
+    
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } }
+      ];
+    }
+
+    const services = await prisma.service.findMany({
+      where,
+      orderBy: [
+        { category: 'asc' },
+        { name: 'asc' }
+      ],
+      include: {
+        employeeServices: {
+          include: {
+            employee: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true
+              }
+            }
+          }
+        },
+        _count: {
+          select: {
+            appointments: true
+          }
+        }
+      }
+    });
+
+    const categories = await prisma.service.findMany({
+      where: { tenantId },
+      select: { category: true },
+      distinct: ['category']
+    });
+
+    return { 
+      services, 
+      categories: categories.map(c => c.category).filter(Boolean) 
+    };
+  }
+
+  async getServiceById(tenantId: string, id: string) {
+    return prisma.service.findFirst({
+      where: {
+        id,
+        tenantId
+      },
+      include: {
+        employeeServices: {
+          include: {
+            employee: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true
+              }
+            }
+          }
+        },
+        _count: {
+          select: {
+            appointments: true
+          }
+        }
+      }
+    });
+  }
+
+  async createService(tenantId: string, data: any) {
+    const { employeeIds, ...serviceData } = data;
+
+    return prisma.service.create({
+      data: {
+        ...serviceData,
+        tenantId,
+        employeeServices: employeeIds && employeeIds.length > 0 ? {
+          create: employeeIds.map((employeeId: string) => ({
+            employeeId
+          }))
+        } : undefined
+      } as any,
+      include: {
+        employeeServices: {
+          include: {
+            employee: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  async updateService(tenantId: string, id: string, data: any) {
+    const { employeeIds, ...serviceData } = data;
+
+    const existing = await prisma.service.findFirst({
+      where: { id, tenantId }
+    });
+
+    if (!existing) {
+      throw new Error('SERVICE_NOT_FOUND');
+    }
+
+    if (employeeIds !== undefined) {
+      await prisma.employeeService.deleteMany({
+        where: { serviceId: id }
+      });
+
+      if (employeeIds.length > 0) {
+        await prisma.employeeService.createMany({
+          data: employeeIds.map((employeeId: string) => ({
+            serviceId: id,
+            employeeId
+          })),
+          skipDuplicates: true
+        });
+      }
+    }
+
+    return prisma.service.update({
+      where: { id },
+      data: serviceData,
+      include: {
+        employeeServices: {
+          include: {
+            employee: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  async deleteService(tenantId: string, id: string) {
+    const service = await prisma.service.findFirst({
+      where: { id, tenantId },
+      include: {
+        _count: {
+          select: {
+            appointments: true,
+            employeeServices: true
+          }
+        }
+      }
+    });
+
+    if (!service) {
+      throw new Error('SERVICE_NOT_FOUND');
+    }
+
+    let deletedAppointmentsCount = 0;
+    if (service._count.appointments > 0) {
+      const appointments = await prisma.appointment.findMany({
+        where: { serviceId: id },
+        include: {
+          invoice: true
+        }
+      });
+
+      const appointmentsWithInvoices = appointments.filter(apt => apt.invoice !== null);
+      if (appointmentsWithInvoices.length > 0) {
+        throw new Error(`HAS_INVOICES:${appointmentsWithInvoices.length}:${service._count.appointments}`);
+      }
+
+      const deleteResult = await prisma.appointment.deleteMany({
+        where: { serviceId: id }
+      });
+      deletedAppointmentsCount = deleteResult.count;
+    }
+
+    await prisma.employeeService.deleteMany({
+      where: { serviceId: id }
+    });
+
+    await prisma.service.delete({
+      where: { id }
+    });
+
+    return { deletedAppointmentsCount };
+  }
+}
+
+export const serviceService = new ServiceService();

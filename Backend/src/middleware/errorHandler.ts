@@ -1,0 +1,67 @@
+import { Request, Response, NextFunction } from 'express';
+import { Prisma } from '../../prisma/generated/prisma/client';
+import { HttpError } from '../lib/errors';
+
+export interface AppError extends Error {
+  statusCode?: number;
+  code?: string;
+}
+
+export const errorHandler = (
+  err: AppError | Prisma.PrismaClientKnownRequestError | Error,
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  console.error('========== ERROR HANDLER ==========');
+  console.error('Error type:', err?.constructor?.name);
+  console.error('Error message:', err?.message);
+  console.error('Request path:', req.path);
+  console.error('Request method:', req.method);
+
+  if (err instanceof HttpError) {
+    return res.status(err.status).json(err.payload);
+  }
+
+  // Legacy public module errors (isAppError in message)
+  if (err instanceof Error && err.message.includes('isAppError')) {
+    try {
+      const parsed = JSON.parse(err.message);
+      if (parsed.isAppError) {
+        return res.status(parsed.status).json(parsed.payload);
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  if (err instanceof Prisma.PrismaClientKnownRequestError) {
+    if (err.code === 'P2002') {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'A record with this information already exists'
+      });
+    }
+    if (err.code === 'P2025') {
+      return res.status(404).json({
+        error: 'Not found',
+        message: 'The requested record was not found'
+      });
+    }
+    return res.status(500).json({
+      error: 'Database error',
+      message: 'An error occurred while processing your request'
+    });
+  }
+
+  // Custom application errors
+  const statusCode = (err as AppError).statusCode || 500;
+  const message = err.message || 'An unexpected error occurred';
+
+  res.status(statusCode).json({
+    error: err.name || 'Error',
+    message,
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+  });
+};
+

@@ -1,0 +1,118 @@
+import { Request, Response, NextFunction } from 'express';
+import { z } from 'zod';
+import { clientService } from './client.service';
+import { createClientSchema, updateClientSchema } from './client.schema';
+
+export class ClientController {
+  async getClients(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { search, status, page = '1', limit = '50' } = req.query;
+      const result = await clientService.getClients(
+        req.tenantId!, 
+        search as string, 
+        status as string, 
+        parseInt(page as string), 
+        parseInt(limit as string)
+      );
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async detectDuplicates(req: Request, res: Response, next: NextFunction) {
+    try {
+      const duplicates = await clientService.detectDuplicates(req.tenantId!);
+      res.json({ duplicates });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getClientById(req: Request, res: Response, next: NextFunction) {
+    try {
+      const client = await clientService.getClientById(req.tenantId!, req.params.id);
+      if (!client) {
+        return res.status(404).json({ error: 'Client not found' });
+      }
+      res.json({ client });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async createClient(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = createClientSchema.parse(req.body);
+      const client = await clientService.createClient(req.tenantId!, data);
+      res.status(201).json({ client });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Validation error', message: error.errors[0].message });
+      }
+      if (error.message === 'DUPLICATE_EMAIL') {
+        return res.status(409).json({
+          error: 'Duplicate client',
+          message: 'A client with this email already exists'
+        });
+      }
+      next(error);
+    }
+  }
+
+  async updateClient(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = updateClientSchema.parse(req.body);
+      const client = await clientService.updateClient(req.tenantId!, req.params.id, data);
+      res.json({ client });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Validation error', message: error.errors[0].message });
+      }
+      if (error.message === 'CLIENT_NOT_FOUND') {
+        return res.status(404).json({ error: 'Client not found' });
+      }
+      next(error);
+    }
+  }
+
+  async deleteClient(req: Request, res: Response, next: NextFunction) {
+    try {
+      await clientService.deleteClient(req.tenantId!, req.params.id);
+      res.json({ message: 'Client deleted successfully' });
+    } catch (error: any) {
+      if (error.message === 'CLIENT_NOT_FOUND') {
+        return res.status(404).json({ error: 'Client not found' });
+      }
+      next(error);
+    }
+  }
+
+  async mergeClients(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { primaryClientId, duplicateClientIds } = req.body;
+      if (!primaryClientId || !Array.isArray(duplicateClientIds) || duplicateClientIds.length === 0) {
+        return res.status(400).json({
+          error: 'Invalid request',
+          message: 'primaryClientId and duplicateClientIds array are required'
+        });
+      }
+      
+      await clientService.mergeClients(req.tenantId!, primaryClientId, duplicateClientIds);
+      res.json({ 
+        message: 'Clients merged successfully',
+        mergedClientId: primaryClientId
+      });
+    } catch (error: any) {
+      if (error.message === 'PRIMARY_CLIENT_NOT_FOUND') {
+        return res.status(404).json({ error: 'Primary client not found' });
+      }
+      if (error.message === 'DUPLICATE_CLIENT_NOT_FOUND') {
+        return res.status(404).json({ error: 'Some duplicate clients not found' });
+      }
+      next(error);
+    }
+  }
+}
+
+export const clientController = new ClientController();

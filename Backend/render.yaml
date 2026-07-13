@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: wellbepro-backend
+    env: node
+    buildCommand: npm install --include=dev && npx prisma generate && npm run build
+    preDeployCommand: npx prisma migrate deploy
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: LANDING_PAGE_URL
+        sync: false

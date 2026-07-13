@@ -1,0 +1,16 @@
+node_modules
+dist
+.env
+.env.local
+.DS_Store
+*.log
+.vscode
+.idea
+.git
+.gitignore
+README.md
+RENDER_DEPLOY.md
+render.yaml
+*.md
+
+

@@ -1,0 +1,1039 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { Plus, Pencil, Trash2, Search, X, Phone, Mail, User as UserIcon, MapPin, Calendar, MoreVertical, ChevronDown, Filter, Loader2 } from 'lucide-react';
+import { Calendar as CalendarComponent } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Button } from '@/components/ui/button';
+import { format } from 'date-fns';
+import { fr } from 'date-fns/locale';
+import { api } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
+import toast from 'react-hot-toast';
+import ConfirmDialog from '@/components/ConfirmDialog';
+
+
+// Backend client structure
+interface BackendClient {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string;
+  address: string | null;
+  status: 'ACTIVE' | 'INACTIVE' | 'BLOCKED';
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  appointments?: any[];
+  _count?: {
+    appointments: number;
+  };
+}
+
+// Frontend display structure
+interface Client {
+  id: string;
+  name: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  address?: string;
+  lastVisit?: Date;
+  lastVisitTime?: string;
+  nextAppointment?: Date;
+  nextAppointmentTime?: string;
+  totalVisits?: number;
+  status: 'Active' | 'Inactive';
+  notes?: string;
+}
+
+// Helper function to convert backend client to frontend display format
+const mapBackendToFrontend = (backendClient: BackendClient, appointments?: any[]): Client => {
+  const name = `${backendClient.firstName} ${backendClient.lastName}`.trim();
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  let nextAppointment: Date | undefined;
+  let nextAppointmentTime: string | undefined;
+  let lastVisit: Date | undefined;
+  let lastVisitTime: string | undefined;
+
+  if (appointments && appointments.length > 0) {
+    // Find next upcoming appointment
+    const upcoming = appointments
+      .filter(apt => new Date(apt.startTime) >= now)
+      .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())[0];
+
+    // Find last visit
+    const past = appointments
+      .filter(apt => new Date(apt.startTime) < now)
+      .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())[0];
+
+    if (upcoming) {
+      nextAppointment = new Date(upcoming.startTime);
+      nextAppointmentTime = format(new Date(upcoming.startTime), 'HH:mm');
+    }
+
+    if (past) {
+      lastVisit = new Date(past.startTime);
+      lastVisitTime = format(new Date(past.startTime), 'HH:mm');
+    }
+  }
+
+  return {
+    id: backendClient.id,
+    name,
+    firstName: backendClient.firstName,
+    lastName: backendClient.lastName,
+    email: backendClient.email || '',
+    phone: backendClient.phone,
+    address: backendClient.address || undefined,
+    status: backendClient.status === 'ACTIVE' ? 'Active' : 'Inactive',
+    notes: backendClient.notes || undefined,
+    nextAppointment,
+    nextAppointmentTime,
+    lastVisit,
+    lastVisitTime,
+    totalVisits: backendClient._count?.appointments || appointments?.length || 0
+  };
+};
+
+export default function ClientsGestionPage() {
+  const { user } = useAuth();
+  const [clients, setClients] = useState<Client[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'Active' | 'Inactive'>('all');
+  const [editingAppointment, setEditingAppointment] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [clientToDelete, setClientToDelete] = useState<Client | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [formData, setFormData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    address: '',
+    status: 'Active' as 'Active' | 'Inactive',
+    notes: ''
+  });
+
+  // Fetch clients from API
+  const fetchClients = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const response = await api.getClients({
+        search: searchTerm || undefined,
+        status: statusFilter !== 'all' ? (statusFilter === 'Active' ? 'ACTIVE' : 'INACTIVE') : undefined,
+        limit: 100
+      });
+
+      // Fetch all appointments for these clients at once (more efficient)
+      const clientIds = response.clients.map((c: BackendClient) => c.id);
+      let allAppointments: any[] = [];
+
+      if (clientIds.length > 0) {
+        try {
+          // Fetch appointments for all clients in batches or use a date range
+          // For now, fetch recent and upcoming appointments
+          const now = new Date();
+          const pastDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000); // 1 year ago
+          const futureDate = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000); // 1 year ahead
+
+          const appointmentsResponse = await api.getAppointments({
+            startDate: pastDate.toISOString(),
+            endDate: futureDate.toISOString(),
+            limit: 1000 // Get enough appointments
+          });
+
+          allAppointments = appointmentsResponse.appointments || [];
+        } catch (err) {
+          console.error('Error fetching appointments:', err);
+          // Continue without appointments if fetch fails
+        }
+      }
+
+      // Group appointments by clientId
+      const appointmentsMap = new Map<string, any[]>();
+      allAppointments.forEach((apt: any) => {
+        if (apt.clientId && clientIds.includes(apt.clientId)) {
+          if (!appointmentsMap.has(apt.clientId)) {
+            appointmentsMap.set(apt.clientId, []);
+          }
+          appointmentsMap.get(apt.clientId)!.push(apt);
+        }
+      });
+
+      // Map backend clients to frontend format with appointments
+      const mappedClients = response.clients.map((client: BackendClient) => {
+        const clientAppointments = appointmentsMap.get(client.id) || [];
+        const frontendClient = mapBackendToFrontend(client, clientAppointments);
+        return frontendClient;
+      });
+
+      setClients(mappedClients);
+    } catch (err: any) {
+      console.error('Error fetching clients:', err);
+      const errorMessage = err.message || 'Erreur lors du chargement des clients';
+      setError(errorMessage);
+      toast.error(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch clients on mount and when filters change
+  useEffect(() => {
+    if (user) {
+      fetchClients();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  // Handle search and filter changes with debouncing
+  useEffect(() => {
+    if (user) {
+      const timer = setTimeout(() => {
+        fetchClients();
+      }, 300);
+
+      return () => clearTimeout(timer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTerm, statusFilter]);
+
+  const handleAddClient = () => {
+    setEditingClient(null);
+    setFormData({
+      firstName: '',
+      lastName: '',
+      email: '',
+      phone: '',
+      address: '',
+      status: 'Active',
+      notes: ''
+    });
+    setShowModal(true);
+  };
+
+  const handleEditClient = (client: Client) => {
+    setEditingClient(client);
+    setFormData({
+      firstName: client.firstName,
+      lastName: client.lastName,
+      email: client.email,
+      phone: client.phone,
+      address: client.address || '',
+      status: client.status,
+      notes: client.notes || ''
+    });
+    setShowModal(true);
+  };
+
+  const handleDeleteClick = (client: Client) => {
+    setClientToDelete(client);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!clientToDelete) return;
+
+    setDeleting(true);
+    try {
+      await api.deleteClient(clientToDelete.id);
+      toast.success(`Client "${clientToDelete.name}" supprimé avec succès`);
+      await fetchClients(); // Refresh list
+      setClientToDelete(null);
+    } catch (err: any) {
+      toast.error(err.message || 'Erreur lors de la suppression du client');
+    } finally {
+      setDeleting(false);
+      setDeleteDialogOpen(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // Split name into first and last name if user entered full name in firstName field
+    let firstName = formData.firstName.trim();
+    let lastName = formData.lastName.trim();
+
+    if (!lastName && firstName.includes(' ')) {
+      const parts = firstName.split(' ');
+      firstName = parts[0];
+      lastName = parts.slice(1).join(' ');
+    }
+
+    if (!firstName || !lastName) {
+      toast.error('Veuillez remplir le prénom et le nom');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      if (editingClient) {
+        // Update client
+        await api.updateClient(editingClient.id, {
+          firstName,
+          lastName,
+          email: formData.email || undefined,
+          phone: formData.phone,
+          address: formData.address || undefined,
+          status: formData.status === 'Active' ? 'ACTIVE' : 'INACTIVE',
+          notes: formData.notes || undefined
+        });
+        toast.success(`Client "${firstName} ${lastName}" modifié avec succès`);
+      } else {
+        // Create client
+        await api.createClient({
+          firstName,
+          lastName,
+          email: formData.email || undefined,
+          phone: formData.phone,
+          address: formData.address || undefined,
+          status: formData.status === 'Active' ? 'ACTIVE' : 'INACTIVE',
+          notes: formData.notes || undefined
+        });
+        toast.success(`Client "${firstName} ${lastName}" créé avec succès`);
+      }
+
+      setShowModal(false);
+      await fetchClients(); // Refresh list
+    } catch (err: any) {
+      toast.error(err.message || 'Erreur lors de la sauvegarde du client');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUpdateAppointment = async (clientId: string, newDate: string) => {
+    try {
+      if (!newDate) {
+        // If date is cleared, we could cancel upcoming appointments, but for now just update local state
+        const updatedClients = clients.map(c =>
+          c.id === clientId ? { ...c, nextAppointment: undefined, nextAppointmentTime: undefined } : c
+        );
+        setClients(updatedClients);
+        setEditingAppointment(null);
+        return;
+      }
+
+      // Get the client to find their existing appointments
+      const client = clients.find(c => c.id === clientId);
+      if (!client) return;
+
+      // Check if there's already an upcoming appointment for this client
+      const upcomingAppointments = await api.getAppointments({
+        clientId,
+        startDate: new Date().toISOString(),
+        status: 'CONFIRMED',
+        limit: 1
+      });
+
+      // Get first available service for creating appointment
+      const servicesResponse = await api.getServices().catch(() => ({ services: [] }));
+
+      const services = servicesResponse.services || [];
+
+      if (services.length === 0) {
+        toast.error('Aucun service disponible. Veuillez créer un service d\'abord.');
+        setEditingAppointment(null);
+        return;
+      }
+
+      const selectedService = services[0];
+
+      // Parse the date string and create a proper Date object in local time
+      // newDate format: "YYYY-MM-DDTHH:mm" (local time)
+      // Parse manually to avoid timezone conversion issues
+      const [datePart, timePart] = newDate.split('T');
+      const [year, month, day] = datePart.split('-').map(Number);
+      const [hours, minutes] = timePart ? timePart.split(':').map(Number) : [9, 0];
+
+      // Create date in local timezone
+      const localDate = new Date(year, month - 1, day, hours, minutes, 0, 0);
+
+      // Format as ISO string for the API
+      // This will correctly represent the local date/time in ISO format
+      const isoString = localDate.toISOString();
+
+      // If there's already an upcoming appointment, update it instead of creating a new one
+      if (upcomingAppointments.appointments && upcomingAppointments.appointments.length > 0) {
+        const existingAppointment = upcomingAppointments.appointments[0];
+
+        await api.updateAppointment(existingAppointment.id, {
+          startTime: isoString,
+          duration: selectedService.duration || 30,
+          serviceId: selectedService.id,
+        });
+
+        toast.success('Rendez-vous mis à jour avec succès');
+      } else {
+        // Create new appointment
+        await api.createAppointment({
+          clientId,
+          serviceId: selectedService.id,
+          startTime: isoString,
+          duration: selectedService.duration || 30,
+          status: 'CONFIRMED',
+          notes: 'Créé depuis la gestion des clients'
+        });
+
+        toast.success('Rendez-vous créé avec succès');
+      }
+
+      // Refresh clients to get updated appointment data
+      await fetchClients();
+      setEditingAppointment(null);
+    } catch (err: any) {
+      console.error('Error updating appointment:', err);
+      toast.error(err.message || 'Erreur lors de la mise à jour du rendez-vous');
+      setEditingAppointment(null);
+    }
+  };
+
+
+  const filteredClients = clients.filter(client => {
+    const matchesSearch =
+      client.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      client.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      client.phone.includes(searchTerm);
+
+    const matchesStatus = statusFilter === 'all' || client.status === statusFilter;
+
+    return matchesSearch && matchesStatus;
+  });
+
+  if (loading && clients.length === 0) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-gray-400 mx-auto mb-4" />
+          <p className="text-gray-500">Chargement des clients...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen">
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes slideUp {
+          from { transform: translateY(20px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+        .animate-fadeIn { animation: fadeIn 0.2s ease-out; }
+        .animate-slideUp { animation: slideUp 0.3s ease-out; }
+      `}</style>
+
+      {/* Header */}
+      <div className="mb-8 pt-20 animate-slideUp">
+        <div className="flex items-center justify-between">
+          <div className="flex items-baseline gap-4">
+            <h1 className="text-5xl font-light text-gray-900 tracking-tight">Gestion des Clients</h1>
+            <span className="text-sm text-gray-400 mt-4">
+              {loading ? '...' : `${filteredClients.length} ${filteredClients.length === 1 ? 'client' : 'clients'}`}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-4">
+            {/* View Toggle */}
+            <div className="flex items-center gap-0.5">
+              <button
+                onClick={() => setViewMode('grid')}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'grid' ? 'text-gray-900' : 'text-gray-400 hover:text-gray-600'
+                  }`}
+              >
+                Grille
+              </button>
+              <span className="text-gray-300">/</span>
+              <button
+                onClick={() => setViewMode('list')}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'list' ? 'text-gray-900' : 'text-gray-400 hover:text-gray-600'
+                  }`}
+              >
+                Liste
+              </button>
+            </div>
+
+            <div className="h-8 w-px bg-gray-200"></div>
+
+            {/* New Client Button */}
+            <button
+              onClick={handleAddClient}
+              className="px-5 py-2 bg-[#002366] text-white text-sm font-medium rounded-full hover:bg-gray-800 transition-colors flex items-center gap-2"
+            >
+              Nouveau
+              <Plus size={16} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Error Message */}
+      {error && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-600 rounded-lg">
+          {error}
+        </div>
+      )}
+
+      {/* Search and Filters */}
+      <div className="mb-6 animate-fadeIn">
+        <div className="flex items-center gap-4">
+          <div className="flex-1 relative">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <input
+              type="text"
+              placeholder="Rechercher un client..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-12 pr-4 py-3 rounded-full bg-white border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all"
+            />
+            {loading && searchTerm && (
+              <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-gray-400" />
+            )}
+          </div>
+
+          {/* Status Filter */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setStatusFilter('all')}
+              className={`px-4 py-2 rounded-full text-xs font-medium transition-all ${statusFilter === 'all' ? 'bg-[#002366] text-white' : 'bg-white text-gray-600 hover:bg-gray-100'
+                }`}
+            >
+              Tous
+            </button>
+            <button
+              onClick={() => setStatusFilter('Active')}
+              className={`px-4 py-2 rounded-full text-xs font-medium transition-all ${statusFilter === 'Active' ? 'bg-[#002366] text-white' : 'bg-white text-gray-600 hover:bg-gray-100'
+                }`}
+            >
+              Actifs
+            </button>
+            <button
+              onClick={() => setStatusFilter('Inactive')}
+              className={`px-4 py-2 rounded-full text-xs font-medium transition-all ${statusFilter === 'Inactive' ? 'bg-[#002366] text-white' : 'bg-white text-gray-600 hover:bg-gray-100'
+                }`}
+            >
+              Inactifs
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Grid View */}
+      {viewMode === 'grid' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-fadeIn">
+          {filteredClients.map((client) => (
+            <div
+              key={client.id}
+              className="bg-white rounded-lg border border-gray-100 p-6 hover:shadow-lg hover:border-gray-200 transition-all group"
+            >
+              {/* Header */}
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-full bg-[#002366] flex items-center justify-center">
+                    <span className="text-white font-medium text-lg">
+                      {client.name.charAt(0).toUpperCase()}
+                    </span>
+                  </div>
+                  <div>
+                    <h3 className="font-medium text-gray-900">{client.name}</h3>
+                    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium mt-1 ${client.status === 'Active'
+                        ? 'bg-emerald-50 text-emerald-700'
+                        : 'bg-gray-100 text-gray-600'
+                      }`}>
+                      {client.status}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => handleEditClient(client)}
+                    className="p-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                  <button
+                    onClick={() => handleDeleteClick(client)}
+                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Contact Info */}
+              <div className="space-y-2.5 mb-4">
+                {client.email && (
+                  <div className="flex items-center gap-2 text-sm text-gray-600">
+                    <Mail size={14} className="text-gray-400" />
+                    <span className="truncate">{client.email}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-2 text-sm text-gray-600">
+                  <Phone size={14} className="text-gray-400" />
+                  <span>{client.phone}</span>
+                </div>
+                {client.address && (
+                  <div className="flex items-center gap-2 text-sm text-gray-600">
+                    <MapPin size={14} className="text-gray-400" />
+                    <span className="truncate">{client.address}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Stats */}
+              <div className="pt-4 border-t border-gray-100">
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="text-gray-400">Prochain RDV</span>
+                  <span className="text-gray-400">{client.totalVisits || 0} visites</span>
+                </div>
+                {editingAppointment === client.id ? (
+                  <div className="flex items-center gap-2">
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <button
+                          className="flex-1 px-2 py-1 text-xs rounded border border-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-900"
+                        >
+                          {client.nextAppointment
+                            ? format(new Date(client.nextAppointment), 'PPP', { locale: fr })
+                            : 'Choisir une date'}
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <CalendarComponent
+                          mode="single"
+                          selected={client.nextAppointment ? new Date(client.nextAppointment) : undefined}
+                          onSelect={(date) => {
+                            if (date) {
+                              // Create date with default time (9 AM) to avoid timezone issues at midnight
+                              const localDate = new Date(date);
+                              localDate.setHours(9, 0, 0, 0); // Set to 9 AM local time
+                              // Format as YYYY-MM-DDTHH:mm in local time
+                              const year = localDate.getFullYear();
+                              const month = String(localDate.getMonth() + 1).padStart(2, '0');
+                              const day = String(localDate.getDate()).padStart(2, '0');
+                              const hours = String(localDate.getHours()).padStart(2, '0');
+                              const minutes = String(localDate.getMinutes()).padStart(2, '0');
+                              const dateString = `${year}-${month}-${day}T${hours}:${minutes}`;
+                              handleUpdateAppointment(client.id, dateString);
+                            } else {
+                              handleUpdateAppointment(client.id, '');
+                            }
+                          }}
+                          initialFocus
+                          locale={fr}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    <button
+                      onClick={() => setEditingAppointment(null)}
+                      className="p-1 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                      title="Annuler"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-gray-600">
+                      <Calendar size={12} />
+                      <span className="text-xs">
+                        {client.nextAppointment
+                          ? `${new Date(client.nextAppointment).toLocaleDateString('fr-FR', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric'
+                          })}${client.nextAppointmentTime ? ` à ${client.nextAppointmentTime}` : ''}`
+                          : 'Non planifié'}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setEditingAppointment(client.id)}
+                      className="p-1 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                      title="Modifier RDV"
+                    >
+                      <Pencil size={12} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* List View */}
+      {viewMode === 'list' && (
+        <div className="bg-white rounded-lg border border-gray-100 shadow-sm overflow-hidden animate-fadeIn">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
+                  <th className="px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Client</th>
+                  <th className="px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Contact</th>
+                  <th className="px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap hidden xl:table-cell">Adresse</th>
+                  <th className="px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap hidden lg:table-cell">Prochain RDV</th>
+                  <th className="px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap hidden md:table-cell">Visites</th>
+                  <th className="px-4 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Statut</th>
+                  <th className="px-4 py-4 text-right text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {filteredClients.map((client) => (
+                  <tr key={client.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-3 min-w-[160px]">
+                        <div className="w-10 h-10 rounded-full bg-[#002366] flex items-center justify-center flex-shrink-0">
+                          <span className="text-white font-medium text-sm">
+                            {client.name.charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                        <div className="font-medium text-gray-900 truncate">{client.name}</div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-4">
+                      <div className="space-y-1 min-w-[180px]">
+                        {client.email && (
+                          <div className="flex items-center gap-2 text-sm text-gray-600">
+                            <Mail size={12} className="text-gray-400 flex-shrink-0" />
+                            <span className="truncate">{client.email}</span>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <Phone size={12} className="text-gray-400 flex-shrink-0" />
+                          <span className="whitespace-nowrap">{client.phone}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-4 text-sm text-gray-600 hidden xl:table-cell">
+                      {client.address ? (
+                        <div className="flex items-center gap-2 max-w-[200px]">
+                          <MapPin size={12} className="text-gray-400 flex-shrink-0" />
+                          <span className="truncate">{client.address}</span>
+                        </div>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-4 text-sm text-gray-600 whitespace-nowrap hidden lg:table-cell">
+                      {editingAppointment === client.id ? (
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+
+                              className="px-2 py-1 text-xs rounded border border-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-900"
+                            >
+                              {client.nextAppointment
+                                ? format(new Date(client.nextAppointment), 'PPP', { locale: fr })
+                                : 'Choisir une date'}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <CalendarComponent
+                              mode="single"
+                              selected={client.nextAppointment ? new Date(client.nextAppointment) : undefined}
+                              onSelect={(date) => {
+                                if (date) {
+                                  // Create date with default time (9 AM) to avoid timezone issues at midnight
+                                  const localDate = new Date(date);
+                                  localDate.setHours(9, 0, 0, 0); // Set to 9 AM local time
+                                  // Format as YYYY-MM-DDTHH:mm in local time
+                                  const year = localDate.getFullYear();
+                                  const month = String(localDate.getMonth() + 1).padStart(2, '0');
+                                  const day = String(localDate.getDate()).padStart(2, '0');
+                                  const hours = String(localDate.getHours()).padStart(2, '0');
+                                  const minutes = String(localDate.getMinutes()).padStart(2, '0');
+                                  const dateString = `${year}-${month}-${day}T${hours}:${minutes}`;
+                                  handleUpdateAppointment(client.id, dateString);
+                                } else {
+                                  handleUpdateAppointment(client.id, '');
+                                }
+                              }}
+                              initialFocus
+                              locale={fr}
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span>
+                            {client.nextAppointment
+                              ? `${new Date(client.nextAppointment).toLocaleDateString('fr-FR', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric'
+                              })}${client.nextAppointmentTime ? ` à ${client.nextAppointmentTime}` : ''}`
+                              : 'Non planifié'}
+                          </span>
+                          <button
+                            onClick={() => setEditingAppointment(client.id)}
+                            className="p-1 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                            title="Modifier RDV"
+                          >
+                            <Pencil size={12} />
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-4 text-sm text-gray-600 whitespace-nowrap hidden md:table-cell">
+                      {client.totalVisits || 0}
+                    </td>
+                    <td className="px-4 py-4 whitespace-nowrap">
+                      <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${client.status === 'Active'
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : 'bg-gray-100 text-gray-600'
+                        }`}>
+                        {client.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => handleEditClient(client)}
+                          className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+                          title="Modifier"
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteClick(client)}
+                          className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                          title="Supprimer"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {!loading && filteredClients.length === 0 && (
+        <div className="bg-white rounded-lg border border-gray-100 p-12 text-center animate-fadeIn">
+          <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
+            <UserIcon size={32} className="text-gray-400" />
+          </div>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Aucun client trouvé</h3>
+          <p className="text-gray-500 text-sm mb-6">
+            {searchTerm ? 'Essayez de modifier votre recherche' : 'Commencez par ajouter votre premier client'}
+          </p>
+          {!searchTerm && (
+            <button
+              onClick={handleAddClient}
+              className="px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-full hover:bg-gray-800 transition-colors inline-flex items-center gap-2"
+            >
+              <Plus size={16} />
+              Ajouter un client
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-white rounded-lg shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-slideUp">
+            {/* Header */}
+            <div className="sticky top-0 bg-white border-b border-gray-100 px-8 py-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-light text-gray-900">
+                  {editingClient ? 'Modifier le client' : 'Nouveau client'}
+                </h2>
+                <button
+                  onClick={() => setShowModal(false)}
+                  disabled={saving}
+                  className="p-2 text-gray-400 hover:text-gray-900 transition-colors disabled:opacity-50"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleSubmit} className="px-8 py-6">
+              <div className="space-y-6">
+                {/* Personal Info */}
+                <div className="space-y-4">
+                  <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider">Informations personnelles</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label htmlFor="firstName" className="block text-sm font-medium text-gray-700">
+                        Prénom *
+                      </label>
+                      <input
+                        id="firstName"
+                        type="text"
+                        value={formData.firstName}
+                        onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all"
+                        placeholder="Sophie"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label htmlFor="lastName" className="block text-sm font-medium text-gray-700">
+                        Nom *
+                      </label>
+                      <input
+                        id="lastName"
+                        type="text"
+                        value={formData.lastName}
+                        onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all"
+                        placeholder="Martin"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label htmlFor="phone" className="block text-sm font-medium text-gray-700">
+                        Téléphone *
+                      </label>
+                      <input
+                        id="phone"
+                        type="tel"
+                        value={formData.phone}
+                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all"
+                        placeholder="+33 6 12 34 56 78"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2 md:col-span-1">
+                      <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+                        Email
+                      </label>
+                      <input
+                        id="email"
+                        type="email"
+                        value={formData.email}
+                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all"
+                        placeholder="sophie.martin@email.com"
+                      />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <label htmlFor="address" className="block text-sm font-medium text-gray-700">
+                        Adresse
+                      </label>
+                      <input
+                        id="address"
+                        type="text"
+                        value={formData.address}
+                        onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all"
+                        placeholder="15 Rue de la Paix, Paris"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Status */}
+                <div className="space-y-4">
+                  <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider">Statut</h3>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, status: 'Active' })}
+                      className={`flex-1 px-4 py-2.5 rounded-full text-sm font-medium transition-all ${formData.status === 'Active'
+                          ? 'bg-emerald-50 text-emerald-700 border-2 border-emerald-300'
+                          : 'bg-gray-50 text-gray-600 border-2 border-gray-200 hover:border-gray-300'
+                        }`}
+                    >
+                      Actif
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, status: 'Inactive' })}
+                      className={`flex-1 px-4 py-2.5 rounded-full text-sm font-medium transition-all ${formData.status === 'Inactive'
+                          ? 'bg-gray-100 text-gray-700 border-2 border-gray-300'
+                          : 'bg-gray-50 text-gray-600 border-2 border-gray-200 hover:border-gray-300'
+                        }`}
+                    >
+                      Inactif
+                    </button>
+                  </div>
+                </div>
+
+                {/* Notes */}
+                <div className="space-y-4">
+                  <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider">Notes</h3>
+                  <textarea
+                    value={formData.notes}
+                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                    rows={4}
+                    placeholder="Ajouter des notes sur ce client..."
+                    className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all resize-none"
+                  />
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="sticky bottom-0 bg-white border-t border-gray-100 -mx-8 px-8 py-4 mt-6 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  disabled={saving}
+                  className="flex-1 px-6 py-2.5 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors disabled:opacity-50"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="flex-1 px-6 py-2.5 bg-[#002366] text-white text-sm font-medium rounded-full hover:bg-gray-800 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      Enregistrement...
+                    </>
+                  ) : (
+                    editingClient ? 'Mettre à jour' : 'Créer'
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        onConfirm={handleDeleteConfirm}
+        title="Supprimer le client"
+        description={
+          clientToDelete
+            ? `Êtes-vous sûr de vouloir supprimer le client "${clientToDelete.name}" ? Cette action est irréversible.`
+            : 'Êtes-vous sûr de vouloir supprimer ce client ? Cette action est irréversible.'
+        }
+        confirmText="Supprimer"
+        cancelText="Annuler"
+        variant="destructive"
+        loading={deleting}
+      />
+    </div>
+  );
+}

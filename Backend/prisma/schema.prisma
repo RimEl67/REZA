@@ -1,0 +1,592 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "./generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Multi-Tenant: Each tenant is an organization/establishment
+model Tenant {
+  id          String   @id @default(cuid())
+  name        String
+  subdomain   String?  @unique // Optional subdomain for tenant
+  domain      String?  @unique // Optional custom domain
+  email       String
+  phone       String?
+  address     String?
+  logo        String?
+  
+  // Landing page fields
+  category    String?  // Main category (Coiffeur, Barbier, Manucure, Institut, etc.)
+  coverImage  String?  // Cover image for landing page
+  shortDescription String? // Short description for search cards
+  website     String?  // Website URL
+  city        String?  // City name (for search and display)
+  googleMapsLink String? // Google Maps link (e.g., https://maps.google.com/?q=...)
+  latitude    Float?   // GPS coordinates for map
+  longitude   Float?   // GPS coordinates for map
+  tags        String[] // Tags for search and filtering (e.g., ["spa", "hammam", "massage"])
+  
+  isActive    Boolean  @default(true)
+  subscriptionActive Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  users       User[]
+  clients     Client[]
+  services    Service[]
+  employees   Employee[]
+  appointments Appointment[]
+  invoices    Invoice[]
+  reviews     Review[]
+  cashTransactions CashTransaction[]
+  settings    TenantSettings?
+  favorites   Favorite[] @relation("TenantFavorites")
+  notifications Notification[]
+  bookingGroups BookingGroup[]
+
+  @@map("tenants")
+}
+
+// Tenant-specific settings
+model TenantSettings {
+  id              String   @id @default(cuid())
+  tenantId        String   @unique
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  // Business hours
+  businessHours   Json?    // Store business hours as JSON
+  timezone        String   @default("Europe/Paris")
+  currency        String   @default("EUR")
+  language        String   @default("fr")
+  
+  // Booking settings
+  bookingAdvanceDays Int   @default(30)
+  cancellationHours  Int   @default(24)
+  
+  // Notification settings
+  emailNotifications Json?
+  smsNotifications     Json?
+  
+  // Appointment display settings
+  appointmentDisplaySettings Json? // Store appointment display preferences (showColorInRDV, fields order and visibility)
+  
+  // Photos/Gallery
+  photos Json? // Store establishment photos as JSON array
+  
+  // Establishment description
+  description String? // Store establishment description (À-propos section)
+  
+  // Payment methods
+  paymentMethods Json? // Store payment methods (IBAN, cards, etc.) as JSON array
+  
+  // Landing page additional fields
+  amenities Json? // Store amenities as JSON array (e.g., ["WiFi gratuit", "Climatisation", "Parking"])
+  socialMedia Json? // Store social media links as JSON (e.g., { instagram: "...", facebook: "..." })
+  featured Boolean @default(false) // Whether tenant is featured on landing page
+  
+  // Landing page display controls
+  showMap Boolean @default(true) // Show map on landing page
+  showOpeningHours Boolean @default(true) // Show opening hours on landing page
+  showOnlineReservation Boolean @default(true) // Show online reservation button/feature
+  showReviews Boolean @default(true) // Show reviews section on landing page
+  onlineReservationEnabled Boolean @default(true) // Enable online reservation functionality
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("tenant_settings")
+}
+
+// Users (staff members) - belong to a tenant
+model User {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  email       String
+  password    String   // Hashed password
+  firstName   String
+  lastName    String
+  phone       String?
+  role        UserRole @default(STAFF)
+  isActive    Boolean  @default(true)
+  avatar      String?
+  
+  // Relations
+  appointments Appointment[] @relation("AppointmentEmployee")
+  createdAppointments Appointment[] @relation("AppointmentCreator")
+  createdCashTransactions CashTransaction[] @relation("CashTransactionCreator")
+  notifications Notification[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, email])
+  @@map("users")
+}
+
+enum UserRole {
+  SUPER_ADMIN  // System admin (can access all tenants)
+  ADMIN        // Tenant admin
+  STAFF        // Regular staff member
+  RECEPTIONIST // Reception staff
+}
+
+// Clients - belong to a tenant
+model Client {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  firstName   String
+  lastName    String
+  email       String?
+  phone       String
+  address     String?
+  avatar      String?   // Profile picture URL or base64
+  password    String?  // Hashed password (optional)
+  dateOfBirth DateTime?
+  notes       String?
+  status      ClientStatus @default(ACTIVE)
+  
+  // Relations
+  appointments Appointment[]
+  reviews      Review[]
+  invoices     Invoice[]
+  familyMembers FamilyMember[] @relation("ClientFamilyMembers")
+  favorites    Favorite[] @relation("ClientFavorites")
+  bookingGroupsAsBooker BookingGroup[] @relation("BookingGroupBooker")
+  bookingParticipants BookingParticipant[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, email])
+  @@index([tenantId, phone])
+  @@map("clients")
+}
+
+enum ClientStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+}
+
+// Family Members / Proches - belong to a client
+model FamilyMember {
+  id          String   @id @default(cuid())
+  clientId    String
+  client      Client   @relation("ClientFamilyMembers", fields: [clientId], references: [id], onDelete: Cascade)
+  
+  firstName   String
+  lastName    String
+  email       String?
+  phone       String?
+  relationship String  // e.g., "Fille", "Fils", "Mère", "Épouse", etc.
+  avatar      String?   // URL or base64 image
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([clientId])
+  @@map("family_members")
+}
+
+// Favorites / Favoris - clients can favorite tenants (salons)
+model Favorite {
+  id          String   @id @default(cuid())
+  clientId    String
+  client      Client   @relation("ClientFavorites", fields: [clientId], references: [id], onDelete: Cascade)
+  
+  tenantId    String
+  tenant      Tenant   @relation("TenantFavorites", fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+
+  @@unique([clientId, tenantId]) // A client can only favorite a tenant once
+  @@index([clientId])
+  @@index([tenantId])
+  @@map("favorites")
+}
+
+// Services/Prestations - belong to a tenant
+model Service {
+  id              String   @id @default(cuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  name            String
+  abbreviation    String?
+  description     String?
+  category        String?
+  color           String   @default("#002366")
+  
+  // Pricing
+  price           Float?
+  priceType       PriceType @default(FIXED)
+  priceFrom       Float?
+  priceTo         Float?
+  onQuote         Boolean  @default(false)
+  
+  // Duration in minutes
+  duration        Int
+  
+  // Visibility
+  visibility      Visibility @default(BOOKABLE)
+  
+  // Multiple providers can offer this service
+  multipleProviders Boolean @default(false)
+  
+  // Competences/skills required
+  competences     String[]
+  
+  // Relations
+  appointments    Appointment[]
+  employeeServices EmployeeService[]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("services")
+}
+
+enum PriceType {
+  FIXED
+  FROM
+  RANGE
+}
+
+enum Visibility {
+  BOOKABLE  // Can be booked online
+  VISIBLE   // Visible but not bookable
+  HIDDEN    // Hidden from clients
+}
+
+// Employees/Collaborateurs - belong to a tenant
+model Employee {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  firstName   String
+  lastName    String
+  email       String?
+  phone       String?
+  avatar      String?
+  isActive    Boolean  @default(true)
+  
+  // Working hours (stored as JSON for flexibility)
+  workingHours Json?
+  
+  // Agenda settings (stored as JSON for flexibility)
+  // Contains: color, role, timeSlotDuration, bufferTime, maxAppointmentsPerDay, allowOnlineBooking, status
+  agendaSettings Json?
+  
+  // Relations
+  employeeServices EmployeeService[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("employees")
+}
+
+// Many-to-many: Employees can offer multiple services
+model EmployeeService {
+  id          String   @id @default(cuid())
+  employeeId  String
+  serviceId   String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  service     Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+
+  @@unique([employeeId, serviceId])
+  @@map("employee_services")
+}
+
+// Appointments/Rendez-vous - belong to a tenant
+model Appointment {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  
+  serviceId   String
+  service     Service  @relation(fields: [serviceId], references: [id])
+  
+  employeeId  String?
+  employee    User?    @relation("AppointmentEmployee", fields: [employeeId], references: [id])
+  
+  createdById String
+  createdBy   User     @relation("AppointmentCreator", fields: [createdById], references: [id])
+  
+  // Appointment details
+  startTime   DateTime
+  endTime     DateTime
+  duration    Int      // Duration in minutes
+  status      AppointmentStatus @default(CONFIRMED)
+  notes       String?
+  
+  // Cancellation
+  cancelledAt DateTime?
+  cancelledBy String?
+  cancellationReason String?
+
+  bookingGroupId String?
+  bookingGroup   BookingGroup? @relation(fields: [bookingGroupId], references: [id], onDelete: SetNull)
+  bookingParticipant BookingParticipant?
+  
+  // Relations
+  invoice     Invoice?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, startTime])
+  @@index([tenantId, clientId])
+  @@index([tenantId, employeeId])
+  @@map("appointments")
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+// Invoices/Factures - belong to a tenant
+model Invoice {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id])
+  
+  appointmentId String? @unique
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id])
+  
+  invoiceNumber String
+  amount      Float
+  tax         Float    @default(0)
+  total       Float
+  status      InvoiceStatus @default(PENDING)
+  paymentMethod PaymentMethod?
+  paidAt      DateTime?
+  notes       String?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([tenantId, clientId])
+  @@map("invoices")
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  CHECK
+  ONLINE
+}
+
+// Reviews/Avis - belong to a tenant
+model Review {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id])
+  
+  appointmentId String?
+  
+  rating      Int      // 1-5 stars
+  comment     String?
+  status      ReviewStatus @default(PENDING)
+  moderatedBy String?
+  moderatedAt DateTime?
+  metadata    Json?    // Store additional data (e.g., detailedRatings)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@map("reviews")
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Cash Transactions (Deposits/Withdrawals) - belong to a tenant
+model CashTransaction {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  type        CashTransactionType
+  amount      Float
+  paymentMethod PaymentMethod
+  notes       String?
+  
+  createdById String
+  createdBy   User     @relation("CashTransactionCreator", fields: [createdById], references: [id])
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt])
+  @@map("cash_transactions")
+}
+
+enum CashTransactionType {
+  DEPOSIT    // Dépôt
+  WITHDRAWAL // Retrait
+}
+
+// Notifications - belong to a tenant
+model Notification {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  userId      String?  // If null, notification is for all users in tenant
+  user        User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  type        NotificationType
+  title       String
+  message     String
+  link        String?  // Optional link to related resource (e.g., /dashboard/clients/mes-avis/avis-a-moderer)
+  isRead      Boolean  @default(false)
+  readAt      DateTime?
+  
+  // Metadata for different notification types
+  metadata    Json?    // Store additional data (e.g., reviewId, appointmentId, etc.)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([tenantId, isRead])
+  @@index([tenantId, userId])
+  @@index([tenantId, createdAt])
+  @@map("notifications")
+}
+
+enum NotificationType {
+  REVIEW_PENDING      // New review needs moderation
+  REVIEW_APPROVED     // Review was approved
+  REVIEW_REJECTED     // Review was rejected
+  APPOINTMENT_NEW     // New appointment created
+  APPOINTMENT_CONFIRMED // Appointment confirmed by tenant
+  APPOINTMENT_CANCELLED // Appointment cancelled
+  APPOINTMENT_REMINDER // Appointment reminder
+  SYSTEM              // System notification
+}
+
+// Early Access Signups - for "Rejoignez l'Avant-Première" forms
+model EarlyAccessSignup {
+  id            String   @id @default(cuid())
+  fullName      String
+  email         String
+  phone         String?  // Optional phone number
+  establishment String?  // Only for professionals
+  city          String
+  userType      EarlyAccessUserType
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([email])
+  @@index([userType])
+  @@map("early_access_signups")
+}
+
+enum EarlyAccessUserType {
+  PROFESSIONAL  // Professionnel
+  CLIENT        // Client
+}
+
+enum BookingGroupStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+}
+
+model BookingGroup {
+  id              String   @id @default(cuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  bookerClientId  String?
+  bookerClient    Client?  @relation("BookingGroupBooker", fields: [bookerClientId], references: [id], onDelete: SetNull)
+  bookerFirstName String
+  bookerLastName  String
+  bookerPhone     String
+  bookerEmail     String?
+
+  startTime       DateTime
+  status          BookingGroupStatus @default(PENDING)
+  grandTotal      Float    @default(0)
+  pricingSummary  Json?
+
+  participants    BookingParticipant[]
+  appointments    Appointment[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId, startTime])
+  @@map("booking_groups")
+}
+
+model BookingParticipant {
+  id              String   @id @default(cuid())
+  bookingGroupId  String
+  bookingGroup    BookingGroup @relation(fields: [bookingGroupId], references: [id], onDelete: Cascade)
+
+  displayName     String
+  clientId        String?
+  client          Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  isBooker        Boolean  @default(false)
+  serviceIds      String[]
+  durationMinutes Int
+  subtotal        Float    @default(0)
+
+  appointmentId   String?  @unique
+  appointment     Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([bookingGroupId])
+  @@map("booking_participants")
+}
+

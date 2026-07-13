@@ -1,0 +1,962 @@
+'use client';
+
+import React, { useState, useEffect, useRef } from 'react';
+import { Eye, EyeOff, Mail, ArrowLeft } from 'lucide-react';
+import CurvySlideButton from '@/components/UI/CurvySlideButton';
+import { Checkbox } from "@/components/UI/checkbox";
+import LoadingOverlay from '@/components/UI/LoadingOverlay';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '../../context/AuthContext';
+import { AnimatePresence, motion } from 'framer-motion';
+
+// Animated Text Component
+const AnimatedText = ({ className = "" }: { className?: string }) => {
+  const messages = [
+    { title: "Réservez votre moment bien-être en un instant", subtitle: "Trouvez et réservez facilement le soin ou la séance qui vous correspond, près de chez vous." },
+    { title: "Gérez tous vos rendez-vous au même endroit", subtitle: "Consultez, modifiez ou annulez vos réservations en toute liberté, 24h/24." },
+    { title: "Recevez des rappels pour ne rien manquer", subtitle: "Soyez prévenu avant chaque rendez-vous, pour une expérience sans stress." },
+    { title: "Découvrez de nouveaux soins et praticiens", subtitle: "Explorez des offres exclusives et laissez-vous guider vers le bien-être qui vous ressemble." }
+  ];
+  
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [isAnimating, setIsAnimating] = useState(false);
+  
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setIsAnimating(true);
+      setTimeout(() => {
+        setCurrentIndex((prev) => (prev + 1) % messages.length);
+        setIsAnimating(false);
+      }, 500);
+    }, 4000);
+    
+    return () => clearInterval(interval);
+  }, []);
+  
+  return (
+    <div className={`min-h-[140px] flex flex-col justify-center text-left pl-2 lg:pl-0 ${className}`}> {/* reduced padding to move left */}
+      <div className={`transition-all duration-500 pr-0 ${isAnimating ? 'opacity-0 transform translate-y-4' : 'opacity-100 transform translate-y-0'}`}> 
+        <h2 className="text-2xl lg:text-2xl font-extrabold text-white mb-4 leading-tight text-left">
+          {messages[currentIndex].title}
+        </h2>
+        <p className="text-sm lg:text-base text-blue-100 font-medium leading-relaxed text-left">
+          {messages[currentIndex].subtitle}
+        </p>
+      </div>
+      {/* Progress Dots */}
+      <div className="flex gap-2 justify-start mt-6">
+        {messages.map((_, index) => (
+          <div
+            key={index}
+            className={`h-1.5 rounded-full transition-all duration-500 ${
+              index === currentIndex 
+                ? 'w-8 bg-white' 
+                : 'w-1.5 bg-white/30'
+            }`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// Feature Pill Component
+const FeaturePill = ({ icon, text }: { icon: string; text: string }) => (
+  <div className="px-5 py-2.5 bg-white/10 backdrop-blur-md rounded-full border border-white/20 flex items-center gap-2 hover:bg-white/15 transition-all duration-300 hover:scale-105 cursor-default shadow-lg">
+    <span className="text-lg">{icon}</span>
+    <span className="text-white font-semibold text-sm">{text}</span>
+  </div>
+);
+
+// Stat Item Component
+const StatItem = ({ number, label }: { number: string; label: string }) => (
+  <div className="text-center group cursor-default">
+    <div className="text-3xl lg:text-4xl font-bold text-white mb-1 group-hover:scale-110 transition-transform duration-300">
+      {number}
+    </div>
+    <div className="text-sm text-blue-100 font-medium">{label}</div>
+  </div>
+);
+
+function LoginPageContent() {
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [keepLoggedIn, setKeepLoggedIn] = useState(false);
+  const [acceptTerms, setAcceptTerms] = useState(false);
+  const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<{[key: string]: string}>({});
+  const [loading, setLoading] = useState(false);
+  const [homeLoading, setHomeLoading] = useState(false);
+  const { login, isAuthenticated, logout } = useAuth();
+  const router = useRouter();
+
+
+  const handleSubmit = async (e?: React.FormEvent) => {
+    console.log('[Login] handleSubmit called', { mode, loading, password: password ? '***' : 'empty', confirmPassword: confirmPassword ? '***' : 'empty' });
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
+    if (loading) {
+      console.log('[Login] Already loading, ignoring submit');
+      return;
+    }
+    
+    // Clear previous errors IMMEDIATELY and forcefully
+    console.log('[Login] Clearing all previous errors at start of handleSubmit');
+    setError('');
+    setFieldErrors({});
+    
+    const errors: {[key: string]: string} = {};
+    
+    if (mode === 'signup') {
+      // Use React state values directly - they should be up to date when form is submitted
+      // React state is the source of truth for controlled inputs
+      let currentPassword = password || '';
+      let currentConfirmPassword = confirmPassword || '';
+      let currentEmail = email || '';
+      let currentFirstName = firstName || '';
+      let currentLastName = lastName || '';
+      
+      // Also try to read from DOM as a fallback, but prioritize state
+      if (e && e.currentTarget) {
+        const form = e.currentTarget as HTMLFormElement;
+        const passwordInput = form.querySelector('#password') as HTMLInputElement;
+        const confirmPasswordInput = form.querySelector('#confirmPassword') as HTMLInputElement;
+        
+        // Only use DOM values if state values are empty (shouldn't happen with controlled inputs)
+        if (!currentPassword && passwordInput?.value) {
+          currentPassword = passwordInput.value;
+          console.log('[Signup] Using password from DOM (state was empty)');
+        }
+        if (!currentConfirmPassword && confirmPasswordInput?.value) {
+          currentConfirmPassword = confirmPasswordInput.value;
+          console.log('[Signup] Using confirmPassword from DOM (state was empty)');
+        }
+      }
+      
+      console.log('[Signup] Values for validation:', {
+        password: currentPassword ? '***' : 'empty',
+        passwordLength: currentPassword.length,
+        confirmPassword: currentConfirmPassword ? '***' : 'empty',
+        confirmPasswordLength: currentConfirmPassword.length,
+        email: currentEmail ? `${currentEmail.substring(0, 3)}***` : 'empty',
+        firstName: currentFirstName ? `${currentFirstName.substring(0, 1)}***` : 'empty',
+        lastName: currentLastName ? `${currentLastName.substring(0, 1)}***` : 'empty'
+      });
+      
+      // Trim all values
+      const trimmedFirstName = String(currentFirstName || '').trim();
+      const trimmedLastName = String(currentLastName || '').trim();
+      const trimmedEmail = String(currentEmail || '').trim();
+      const trimmedPassword = String(currentPassword || '').trim();
+      const trimmedConfirmPassword = String(currentConfirmPassword || '').trim();
+      
+      // Debug logging with detailed info
+      console.log('[Signup Validation] Raw values:', {
+        passwordRaw: currentPassword,
+        passwordRawType: typeof currentPassword,
+        passwordRawLength: currentPassword?.length,
+        confirmPasswordRaw: currentConfirmPassword,
+        confirmPasswordRawType: typeof currentConfirmPassword,
+        confirmPasswordRawLength: currentConfirmPassword?.length
+      });
+      
+      console.log('[Signup Validation] Trimmed values:', {
+        firstName: trimmedFirstName ? `${trimmedFirstName.substring(0, 1)}***` : 'empty',
+        lastName: trimmedLastName ? `${trimmedLastName.substring(0, 1)}***` : 'empty',
+        email: trimmedEmail ? `${trimmedEmail.substring(0, 3)}***` : 'empty',
+        password: trimmedPassword ? '***' : 'empty',
+        confirmPassword: trimmedConfirmPassword ? '***' : 'empty',
+        passwordLength: trimmedPassword.length,
+        confirmPasswordLength: trimmedConfirmPassword.length,
+        passwordIsTruthy: !!trimmedPassword,
+        passwordIsEmpty: trimmedPassword === '',
+        passwordIsFalsy: !trimmedPassword
+      });
+      
+      // Validate each field independently - only set error if field is actually empty
+      if (!trimmedFirstName) {
+        errors.firstName = 'Le prénom est requis';
+        console.log('[Signup Validation] FirstName is empty');
+      }
+      if (!trimmedLastName) {
+        errors.lastName = 'Le nom est requis';
+        console.log('[Signup Validation] LastName is empty');
+      }
+      if (!trimmedEmail) {
+        errors.email = 'L\'email est requis';
+        console.log('[Signup Validation] Email is empty');
+      }
+      // Only validate password if it's actually empty - use explicit check
+      // Double check: make sure we're not validating a non-empty password
+      const isPasswordEmpty = !trimmedPassword || trimmedPassword === '' || trimmedPassword.length === 0;
+      const isConfirmPasswordEmpty = !trimmedConfirmPassword || trimmedConfirmPassword === '' || trimmedConfirmPassword.length === 0;
+      
+      if (isPasswordEmpty) {
+        errors.password = 'Le mot de passe est requis';
+        console.log('[Signup Validation] Password is empty - length:', trimmedPassword.length, 'value:', trimmedPassword, 'isPasswordEmpty:', isPasswordEmpty);
+      } else {
+        console.log('[Signup Validation] Password is NOT empty - length:', trimmedPassword.length, 'value exists:', !!trimmedPassword);
+      }
+      
+      if (isConfirmPasswordEmpty) {
+        errors.confirmPassword = 'Veuillez confirmer votre mot de passe';
+        console.log('[Signup Validation] ConfirmPassword is empty');
+      }
+      
+      // Only set errors if there are actual errors
+      if (Object.keys(errors).length > 0) {
+        console.log('[Signup Validation] Errors found:', errors);
+        console.log('[Signup Validation] About to set fieldErrors and return - this will prevent form submission');
+        setFieldErrors(errors);
+        setError(''); // Clear general error when showing field errors
+        setLoading(false); // Make sure loading is false
+        console.log('[Signup Validation] Returning early due to validation errors - form will NOT be submitted');
+        return;
+      }
+
+      if (trimmedPassword !== trimmedConfirmPassword) {
+        setError('Les mots de passe ne correspondent pas');
+        setFieldErrors({});
+        return;
+      }
+      if (trimmedPassword.length < 8) {
+        setError('Le mot de passe doit contenir au moins 8 caractères');
+        setFieldErrors({});
+        return;
+      }
+      if (!acceptTerms) {
+        setError('Veuillez accepter les conditions d\'utilisation');
+        setFieldErrors({});
+        return;
+      }
+
+      setLoading(true);
+      
+      // For signup, create account via API and store user data
+      try {
+        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+        const response = await fetch(`${API_URL}/public/auth/client-register`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: currentEmail.trim(),
+            firstName: currentFirstName.trim(),
+            lastName: currentLastName.trim(),
+            phone: '', // Phone is optional for registration
+            password: trimmedPassword // Use trimmed password
+          }),
+        });
+
+        const responseData = await response.json();
+
+        if (!response.ok) {
+          const errorMessage = responseData.message || responseData.error || 'Erreur lors de la création du compte';
+          setError(errorMessage);
+          setFieldErrors({}); // Clear all field errors
+          setLoading(false);
+          return;
+        }
+
+        // Success! Clear all errors immediately before doing anything else
+        console.log('[Signup] Account created successfully (201), clearing all errors immediately');
+        setFieldErrors({}); // Clear all field errors FIRST
+        setError(''); // Clear general error
+        console.log('[Signup] All errors cleared, proceeding with post-registration flow');
+
+        // Check if email verification is required
+        if (responseData.requiresEmailVerification) {
+          // Show success message and redirect to login with message
+          // Show success message
+          const successMessage = responseData.message || 'Compte créé avec succès. Veuillez vérifier votre email pour activer votre compte.';
+          setError(successMessage);
+          // Change error display to success style
+          setTimeout(() => {
+            // Switch to login mode and show message
+            setMode('login');
+            setEmail(currentEmail.trim());
+            setError('Vérifiez votre boîte de réception pour activer votre compte. Vous pouvez vous connecter une fois votre email vérifié.');
+          }, 2000);
+          return;
+        }
+
+        // If email verification is skipped (development mode), login automatically
+        // After successful registration, login the user to update the context
+        // This ensures the AuthContext is properly updated with the new user data
+        console.log('[Signup] Attempting automatic login after successful registration');
+        // Use the trimmed password that was validated and sent to the API
+        const loginResult = await login(currentEmail.trim(), trimmedPassword);
+        
+        if (loginResult.success) {
+          console.log('[Signup] Automatic login successful, redirecting');
+          // Clear all errors before redirecting
+          setError('');
+          setFieldErrors({});
+          // Get redirect URL from query params if present
+          const searchParams = new URLSearchParams(window.location.search);
+          const redirectUrl = searchParams.get('redirect') || '/account';
+          router.push(redirectUrl);
+        } else {
+          console.log('[Signup] Automatic login failed:', loginResult.error);
+          // Don't show error for automatic login failure - just redirect to login page
+          // The user can manually login with their credentials
+          setError('');
+          setFieldErrors({});
+          setMode('login');
+          setEmail(currentEmail.trim());
+          setError('Compte créé avec succès. Veuillez vous connecter avec votre email.');
+          setLoading(false);
+          return;
+        }
+      } catch (error: any) {
+        console.error('Signup error:', error);
+        // Only catch unexpected errors (network errors, etc.)
+        // Don't throw errors for expected API responses
+        const errorMessage = error.message || 'Erreur lors de la création du compte. Veuillez réessayer.';
+        setError(errorMessage);
+        setFieldErrors({});
+        setLoading(false);
+      }
+    } else {
+      // Login validation
+      if (!email.trim()) errors.email = 'L\'email est requis';
+      if (!password.trim()) errors.password = 'Le mot de passe est requis';
+
+      if (Object.keys(errors).length > 0) {
+        setFieldErrors(errors);
+        return;
+      }
+      
+      setLoading(true);
+      console.log('[Login] Attempting login for:', email.trim());
+      
+      try {
+        const result = await login(email.trim(), password.trim());
+        console.log('[Login] Login result:', result);
+        
+        if (result.success) {
+          console.log('[Login] Redirecting to /account');
+          const searchParams = new URLSearchParams(window.location.search);
+          const redirectUrl = searchParams.get('redirect') || '/account';
+          router.push(redirectUrl);
+        } else {
+          setError('Email ou mot de passe incorrect.');
+        }
+      } catch (error: any) {
+        console.error('[Login] Login error:', error);
+        setError('Email ou mot de passe incorrect.');
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleModeSwitch = (newMode: 'login' | 'signup') => {
+    setMode(newMode);
+    setError('');
+    setFieldErrors({});
+    setLoading(false);
+  };
+
+  // Redirect when already authenticated
+  React.useEffect(() => {
+    if (isAuthenticated) {
+      router.push('/account');
+    }
+    
+    // Check for error in URL params
+    const searchParams = new URLSearchParams(window.location.search);
+    const errorParam = searchParams.get('error');
+    const errorDetails = searchParams.get('details');
+    
+    if (errorParam === 'google_auth_failed') {
+      // Provide more specific error messages based on details
+      let errorMessage = 'La connexion avec Google a échoué. Veuillez réessayer.';
+      
+      if (errorDetails) {
+        const decodedDetails = decodeURIComponent(errorDetails);
+        console.error('[Login] Google OAuth error details:', decodedDetails);
+        
+        // Handle specific error cases
+        if (decodedDetails.includes('access_denied') || decodedDetails.includes('user_cancelled')) {
+          errorMessage = 'Connexion annulée. Vous pouvez réessayer en cliquant sur "Se connecter avec Google".';
+        } else if (decodedDetails.includes('no_code')) {
+          errorMessage = 'Erreur lors de la réception du code d\'autorisation. Veuillez réessayer.';
+        } else if (decodedDetails.includes('Le mot de passe est requis') || decodedDetails.includes('password') || decodedDetails.includes('oauth_configuration_error')) {
+          // This shouldn't happen with OAuth, but if it does, provide a helpful message
+          errorMessage = 'Erreur de configuration OAuth. Veuillez réessayer ou utiliser votre email et mot de passe pour vous connecter.';
+        } else {
+          // For other errors, show a generic but helpful message
+          errorMessage = 'Erreur lors de la connexion avec Google. Veuillez réessayer ou utiliser votre email et mot de passe.';
+        }
+      }
+      
+      setError(errorMessage);
+    }
+  }, [isAuthenticated]);
+
+  return (
+    <>
+      <style jsx>{`
+        @keyframes float {
+          0%, 100% {
+            transform: translateY(0) translateX(0);
+          }
+          50% {
+            transform: translateY(-20px) translateX(10px);
+          }
+        }
+        
+        @keyframes float-delayed {
+          0%, 100% {
+            transform: translateY(0) translateX(0);
+          }
+          50% {
+            transform: translateY(20px) translateX(-10px);
+          }
+        }
+        
+        @keyframes float-slow {
+          0%, 100% {
+            transform: translateY(0) translateX(0) scale(1);
+          }
+          50% {
+            transform: translateY(-15px) translateX(-15px) scale(1.1);
+          }
+        }
+        
+        .animate-float {
+          animation: float 8s ease-in-out infinite;
+        }
+        
+        .animate-float-delayed {
+          animation: float-delayed 10s ease-in-out infinite;
+        }
+        
+        .animate-float-slow {
+          animation: float-slow 12s ease-in-out infinite;
+        }
+        .hide-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .hide-scrollbar {
+          -ms-overflow-style: none; /* IE and Edge */
+          scrollbar-width: none; /* Firefox */
+        }
+      `}</style>
+      
+      <div className="h-screen flex flex-col lg:flex-row overflow-hidden">
+        {/* Right Side - Login Form (now first/left) */}
+        <div className="flex-1 bg-[#f6f6ef] flex items-start justify-center p-6 lg:p-12 overflow-y-auto relative hide-scrollbar">
+          {(loading || homeLoading) ? (
+            <div className="w-full h-full flex items-center justify-center">
+              <LoadingOverlay />
+            </div>
+          ) : (
+            <div className="w-full max-w-md pt-4">
+            
+
+            {/* Header */}
+            <div className="mt-4 mb-10">
+              {/* Back to Home Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setHomeLoading(true);
+                  setTimeout(() => {
+                    router.push('/');
+                  }, 1200);
+                }}
+                className="mb-6 flex items-center gap-2 text-gray-900 font-bold hover:text-gray-700 transition-colors text-sm"
+                aria-label="Retour à l'accueil"
+              >
+                <ArrowLeft size={20} className="inline-block" />
+                Retour à l&apos;accueil
+              </button>
+              <h1 className="text-4xl lg:text-4xl font-extrabold text-[#000000] mb-3">
+                {mode === 'signup'
+                  ? 'Nouveau sur Reza ?'
+                  : 'Bienvenue sur Reza !'}
+              </h1>
+              {/* Mode Toggle Links - now left aligned and below the subtitle */}
+              <div className="mt-2 text-left">
+                <p className="text-gray-600 font-medium text-sm">
+                  {mode === 'login' ? (
+                    <>
+                      Pas encore de compte ?{' '}
+                      <button
+                        type="button"
+                        onClick={() => handleModeSwitch('signup')}
+                        className="text-[#000000] font-bold hover:underline"
+                      >
+                        S&apos;inscrire
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      Vous avez déjà un compte ?{' '}
+                      <button
+                        type="button"
+                        onClick={() => handleModeSwitch('login')}
+                        className="text-[#000000] font-bold hover:underline"
+                      >
+                        Se connecter
+                      </button>
+                    </>
+                  )}
+                </p>
+              </div>
+            </div>
+
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.form
+                  key={mode}
+                  onSubmit={handleSubmit}
+                  className="space-y-4"
+                  noValidate
+                  initial={{ opacity: 0, y: 30 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -30 }}
+                  transition={{ duration: 0.35, ease: "easeInOut" }}
+                >
+                  {/* First Name and Last Name - Only for Signup */}
+                  {mode === 'signup' && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label htmlFor="firstName" className="block text-sm font-bold text-gray-900 mb-2">
+                        Prénom
+                      </label>
+                      <input
+                        id="firstName"
+                        name="firstName"
+                        type="text"
+                        placeholder="Jean"
+                        value={firstName}
+                        onChange={(e) => setFirstName(e.target.value)}
+                        className="w-full px-6 py-3 bg-transparent border border-gray-200 rounded-full focus:ring-1 focus:ring-[#082259] outline-none transition-all text-gray-900 placeholder-gray-400 text-base font-medium"
+                      />
+                      {fieldErrors.firstName && (
+                        <p className="mt-2 text-sm text-red-500">{fieldErrors.firstName}</p>
+                      )}
+                    </div>
+                    <div>
+                      <label htmlFor="lastName" className="block text-sm font-bold text-gray-900 mb-2">
+                        Nom
+                      </label>
+                      <input
+                        id="lastName"
+                        name="lastName"
+                        type="text"
+                        placeholder="Dupont"
+                        value={lastName}
+                        onChange={(e) => setLastName(e.target.value)}
+                        className="w-full px-6 py-3 bg-transparent border border-gray-200 rounded-full focus:ring-1 focus:ring-[#082259] outline-none transition-all text-gray-900 placeholder-gray-400 text-base font-medium"
+                      />
+                      {fieldErrors.lastName && (
+                        <p className="mt-2 text-sm text-red-500">{fieldErrors.lastName}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Email Input */}
+                <div>
+                  <label htmlFor="email" className="block text-sm font-bold text-gray-900 mb-2">
+                    Email
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="email"
+                      name="email"
+                      type="text"
+                      placeholder="vous@exemple.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full px-6 py-3 bg-transparent border border-gray-200 rounded-full focus:ring-1 focus:ring-[#082259] outline-none transition-all text-gray-900 placeholder-gray-400 pr-12 text-base font-medium"
+                    />
+                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400">
+                      <Mail size={18} />
+                    </span>
+                  </div>
+                  {fieldErrors.email && (
+                    <p className="mt-2 text-sm text-red-500">{fieldErrors.email}</p>
+                  )}
+                </div>
+
+                {/* Password Input */}
+                <div>
+                  <label htmlFor="password" className="block text-sm font-bold text-[#000000] mb-2">
+                    Mot de passe
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="password"
+                      name="password"
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        // Clear error when user starts typing
+                        if (fieldErrors.password) {
+                          setFieldErrors(prev => {
+                            const newErrors = { ...prev };
+                            delete newErrors.password;
+                            return newErrors;
+                          });
+                        }
+                      }}
+                      className="w-full px-6 py-3 bg-transparent border border-gray-200 rounded-full focus:ring-1 focus:ring-[#082259] outline-none transition-all text-gray-900 placeholder-gray-400 pr-12 text-base font-medium"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                      aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                    >
+                      {showPassword ? <EyeOff size={22} /> : <Eye size={22} />}
+                    </button>
+                  </div>
+                  {fieldErrors.password && (
+                    <p className="mt-2 text-sm text-red-500">{fieldErrors.password}</p>
+                  )}
+                </div>
+
+                {/* Confirm Password - Only for Signup */}
+                {mode === 'signup' && (
+                  <div>
+                    <label htmlFor="confirmPassword" className="block text-sm font-bold text-[#000000] mb-2">
+                      Confirmer le mot de passe
+                    </label>
+                    <div className="relative">
+                      <input
+                        id="confirmPassword"
+                        name="confirmPassword"
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        placeholder="••••••••"
+                        value={confirmPassword}
+                        onChange={(e) => {
+                          setConfirmPassword(e.target.value);
+                          // Clear error when user starts typing
+                          if (fieldErrors.confirmPassword) {
+                            setFieldErrors(prev => {
+                              const newErrors = { ...prev };
+                              delete newErrors.confirmPassword;
+                              return newErrors;
+                            });
+                          }
+                        }}
+                        className="w-full px-6 py-3 bg-transparent border border-gray-200 rounded-full focus:ring-1 focus:ring-[#082259] outline-none transition-all text-gray-900 placeholder-gray-400 pr-12 text-base font-medium"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                        aria-label={showConfirmPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                      >
+                        {showConfirmPassword ? <EyeOff size={22} /> : <Eye size={22} />}
+                      </button>
+                    </div>
+                    {fieldErrors.confirmPassword && (
+                      <p className="mt-2 text-sm text-red-500">{fieldErrors.confirmPassword}</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Error/Success Message */}
+                {error && (
+                  <div className={`rounded-full px-4 py-3 text-sm ${
+                    error.includes('vérifier votre email') || error.includes('Vérifiez votre boîte') || error.includes('Compte créé avec succès')
+                      ? 'bg-green-50 border border-green-200 text-green-600'
+                      : 'bg-red-50 border border-red-200 text-red-600'
+                  }`}>
+                    <p>{error}</p>
+                    {error.includes('Aucun compte trouvé') && mode === 'login' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMode('signup');
+                          setError('');
+                          setEmail(email); // Keep the email they entered
+                        }}
+                        className="mt-2 text-sm text-red-700 underline hover:text-red-900 font-medium"
+                      >
+                        Créer un compte avec cet email
+                      </button>
+                    )}
+                    {(error.includes('vérifier votre email') || error.includes('Vérifiez votre boîte')) && (
+                      <div className="mt-3 text-sm">
+                        <p className="mb-2">Vous n'avez pas reçu l'email ?</p>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+                              const response = await fetch(`${API_URL}/public/auth/client-resend-verification`, {
+                                method: 'POST',
+                                headers: {
+                                  'Content-Type': 'application/json',
+                                },
+                                body: JSON.stringify({ email: email.trim() }),
+                              });
+                              const data = await response.json();
+                              if (response.ok) {
+                                setError('Email de vérification renvoyé avec succès. Vérifiez votre boîte de réception.');
+                              } else {
+                                setError(data.message || 'Erreur lors de l\'envoi de l\'email.');
+                              }
+                            } catch (err: any) {
+                              setError('Erreur lors de l\'envoi de l\'email. Veuillez réessayer.');
+                            }
+                          }}
+                          className="text-green-700 underline hover:text-green-900 font-medium"
+                        >
+                          Renvoyer l'email de vérification
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Options Row */}
+                {mode === 'login' ? (
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center cursor-pointer group">
+                      <Checkbox
+                        id="keepLoggedIn"
+                        checked={keepLoggedIn}
+                        onCheckedChange={checked => setKeepLoggedIn(checked === true)}
+                        className="w-5 h-5 bg-[#f6f6ef] rounded-full border-1 border-gray-300 text-[#000000] cursor-pointer ml-1"
+                      />
+                      <span className="ml-2 text-sm font-semibold text-gray-700 group-hover:text-gray-900">
+                        Rester connecté
+                      </span>
+                    </label>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="flex items-start cursor-pointer group">
+                      <Checkbox
+                        id="acceptTerms"
+                        checked={acceptTerms}
+                        onCheckedChange={checked => setAcceptTerms(checked === true)}
+                        className="w-5 h-5 bg-[#f6f6ef] rounded-full border-1 border-gray-300 text-[#000000] cursor-pointer mt-0.5"
+                      />
+                      <span className="ml-3 text-sm font-semibold text-gray-700 group-hover:text-gray-900">
+                        J&apos;accepte les{' '}
+                        <a href="#" className="text-[#000000] hover:underline">
+                          conditions d&apos;utilisation
+                        </a>{' '}
+                        et la{' '}
+                        <a href="#" className="text-[#000000] hover:underline">
+                          politique de confidentialité
+                        </a>
+                      </span>
+                    </label>
+                  </div>
+                )}
+
+                {/* Sign In Button */}
+                <div className="w-full mt-4">
+                  <CurvySlideButton
+                    onClick={(e) => {
+                      // Let the form's onSubmit handle the submission
+                      // This prevents double submission
+                      if (loading) {
+                        e?.preventDefault();
+                        e?.stopPropagation();
+                      }
+                    }}
+                    type="submit"
+                    disabled={loading}
+                    text={loading 
+                      ? (mode === 'login' ? 'Connexion...' : 'Création...')
+                      : (mode === 'login' ? 'Se connecter' : 'Créer un compte')
+                    }
+                    color="#000000"
+                    textColor="#ffffff"
+                    borderColor="#000000"
+                    hoverTextColor="#000000"
+                    hoverColor="#FCFBF4"
+                    styles={{
+                      width: '100%',
+                      padding: '12px 24px',
+                      fontSize: '16px',
+                      borderRadius: '30px',
+                      marginTop: '16px',
+                      cursor: loading ? 'not-allowed' : 'pointer',
+                      opacity: loading ? 0.7 : 1,
+                    }}
+                  />
+                </div>
+                </motion.form>
+              </AnimatePresence>
+
+            {/* Divider and Social Login */}
+            <>
+                <div className="flex items-center gap-4 my-8">
+                  <div className="flex-1 h-px bg-gray-200"></div>
+                  <span className="text-sm font-semibold text-gray-400">OU</span>
+                  <div className="flex-1 h-px bg-gray-200"></div>
+                </div>
+
+                {/* Social Login */}
+                <CurvySlideButton
+              onClick={async (e) => {
+                e?.preventDefault();
+                e?.stopPropagation();
+                
+                if (loading) return;
+                
+                setLoading(true);
+                setError('');
+                
+                try {
+                  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+                  // Pass the frontend URL so backend knows where to redirect after auth
+                  const frontendUrl = window.location.origin;
+                  const url = `${API_URL}/public/auth/google/url?frontend_url=${encodeURIComponent(frontendUrl)}`;
+                  console.log('[Login Client] Frontend URL:', frontendUrl);
+                  const response = await fetch(url);
+                  
+                  if (!response.ok) {
+                    // Try to get error message from response
+                    let errorMessage = 'Erreur lors de la connexion avec Google';
+                    try {
+                      const errorData = await response.json();
+                      errorMessage = errorData.message || errorData.error || errorMessage;
+                      
+                      // If Google OAuth is not configured, show a helpful message
+                      if (errorData.error === 'Google OAuth not configured') {
+                        errorMessage = 'L\'authentification Google n\'est pas configurée sur le serveur. Veuillez contacter l\'administrateur.';
+                      }
+                    } catch (e) {
+                      // If JSON parsing fails, use default message
+                      console.error('Failed to parse error response:', e);
+                    }
+                    setError(errorMessage);
+                    setLoading(false);
+                    return;
+                  }
+                  
+                  const data = await response.json();
+                  
+                  if (data.url) {
+                    // Redirect to Google OAuth
+                    window.location.href = data.url;
+                  } else {
+                    setError('URL de connexion Google non disponible');
+                    setLoading(false);
+                    return;
+                  }
+                } catch (err: any) {
+                  console.error('Google login error:', err);
+                  // Only catch unexpected errors (network errors, etc.)
+                  setError(err.message || 'Erreur lors de la connexion avec Google. Veuillez réessayer.');
+                  setLoading(false);
+                }
+              }}
+              text={
+                <span className="flex items-center justify-center gap-3">
+                  <svg width="22" height="22" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <g clipPath="url(#clip0_17_40)">
+                      <path d="M47.532 24.552c0-1.636-.146-3.2-.418-4.704H24.48v9.02h13.02c-.56 3.02-2.24 5.58-4.78 7.3v6.06h7.74c4.54-4.18 7.07-10.34 7.07-17.676z" fill="#4285F4"/>
+                      <path d="M24.48 48c6.42 0 11.8-2.12 15.74-5.76l-7.74-6.06c-2.14 1.44-4.88 2.3-8 2.3-6.14 0-11.34-4.14-13.2-9.7H3.36v6.18C7.28 43.82 15.18 48 24.48 48z" fill="#34A853"/>
+                      <path d="M11.28 28.78A13.98 13.98 0 0 1 9.6 24c0-1.66.3-3.28.84-4.78v-6.18H3.36A23.98 23.98 0 0 0 0 24c0 3.98.96 7.74 2.64 11.02l8.64-6.24z" fill="#FBBC05"/>
+                      <path d="M24.48 9.54c3.5 0 6.62 1.2 9.08 3.56l6.8-6.8C36.28 2.12 30.9 0 24.48 0 15.18 0 7.28 4.18 3.36 10.04l8.64 6.18c1.86-5.56 7.06-9.7 13.2-9.7z" fill="#EA4335"/>
+                    </g>
+                    <defs>
+                      <clipPath id="clip0_17_40">
+                        <rect width="48" height="48" fill="white"/>
+                      </clipPath>
+                    </defs>
+                  </svg>
+                  {loading ? 'Connexion...' : 'Se connecter avec Google'}
+                </span>
+              }
+              color="#f6f6ef"
+              textColor="#374151"
+              borderColor="#e5e7eb"
+              hoverTextColor="#ffffff"
+              hoverColor="#000000"
+              styles={{
+                width: '100%',
+                padding: '14px 24px',
+                fontSize: '16px',
+                borderRadius: '30px',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                opacity: loading ? 0.7 : 1,
+              }}
+              disabled={loading}
+            />
+            <div className="w-full text-center mt-3">
+              <span className="text-xs text-gray-400 font-medium">SSL Connexion sécurisée et privée</span>
+            </div>
+            </>
+
+          </div>
+          )}
+        </div>
+
+        {/* Left Side - Image Section (now second/right) */}
+        <div className="w-full lg:w-[700px] bg-[#f6f6ef] relative overflow-hidden">
+          {/* left - Full Height */}
+          <div className="relative w-full h-full p-4">
+            <div className="w-full h-full rounded-3xl overflow-hidden bg-black flex flex-col items-center justify-center relative">
+              {/* Background Image */}
+              <img 
+                src="/log.png" 
+                alt="Fond de connexion" 
+                className="absolute inset-0 w-full h-full object-cover rounded-3xl z-0" 
+              />
+              
+              {/* Animated Gradient Overlay 
+              <div className="absolute inset-0 bg-gradient-to-br from-[#002366]/90 via-[#003d99]/80 to-[#0052cc]/70 z-[1]"></div>
+              */}
+              {/* Floating Shapes */}
+              <div className="absolute inset-0 overflow-hidden z-[2]">
+                <div className="absolute top-20 left-10 w-32 h-32 bg-white/5 rounded-full blur-3xl animate-float"></div>
+                <div className="absolute bottom-20 right-10 w-40 h-40 bg-blue-300/10 rounded-full blur-3xl animate-float-delayed"></div>
+                <div className="absolute top-1/2 left-1/4 w-24 h-24 bg-white/5 rounded-full blur-2xl animate-float-slow"></div>
+                <span className="absolute top-10 left-18 -translate-x-1/2 ext-2xl lg:text-5xl text-white select-none pointer-events-none" style={{zIndex:3}}>*</span>
+              </div>
+              
+              <div className="relative h-full flex flex-col items-start justify-center p-0 lg:p-0 z-10">
+                <div className="space-y-8 max-w-lg text-left">
+                  <div className="mb-0 flex flex-col gap-4 -mt-74">
+                    <div>
+                      {/* Removed star from here */}
+                      <h3 className="text-2xl lg:text-5xl text-white font-medium leading-tight text-left">
+                        <span className="inline-block align-middle ml-2">
+                          <img src="/logos/logo-2.svg?v=rz1" alt="Reza Logo" className="h-6 lg:h-7 w-auto" />
+                        </span>
+                      </h3>
+                    </div>
+                    {/* Dynamic Animated Text - now separated from REZA text */}
+                    <div className="-mt-0 pl-0">
+                      <AnimatedText className="text-white w-[380px] lg:w-[620px] min-w-[520px] max-w-full pl-0 lg:pl-2" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+export default function LoginPage() {
+  return <LoginPageContent />;
+}

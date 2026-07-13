@@ -1,0 +1,277 @@
+import { prisma } from '../../../lib/prisma';
+import { fail } from '../utils/http';
+
+export class FavoritesService {
+  async getClientFavorites(email: string) {
+    try {
+
+    if (!email) {
+      fail(400, {
+        error: 'Email required',
+        message: 'Please provide an email parameter.'
+      });
+    }
+
+    // Find client by email across all tenants
+    const client = await prisma.client.findFirst({
+      where: {
+        email: decodeURIComponent(email)
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    if (!client) {
+      return { favorites: [], count: 0 };
+    }
+
+    const favorites = await (prisma as any).favorite.findMany({
+      where: {
+        clientId: client.id
+      },
+      include: {
+        tenant: {
+          select: {
+            id: true,
+            name: true,
+            logo: true,
+            coverImage: true,
+            address: true,
+            city: true,
+            category: true,
+            shortDescription: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    return { 
+      favorites: favorites.map((f: any) => ({
+        id: f.id,
+        tenantId: f.tenantId,
+        tenant: f.tenant,
+        createdAt: f.createdAt
+      })),
+      count: favorites.length
+    };
+  } catch (error) {
+    throw error;
+  }
+  }
+
+  async addFavorite(body: any) {
+    try {
+    const { clientEmail, tenantId } = body;
+
+    if (!clientEmail || !tenantId) {
+      fail(400, {
+        error: 'Missing required fields',
+        message: 'clientEmail and tenantId are required.'
+      });
+    }
+
+    // Find client by email
+    let client = await prisma.client.findFirst({
+      where: {
+        email: clientEmail.trim().toLowerCase()
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    if (!client) {
+      // Find or create a tenant for clients
+      let tenant = await prisma.tenant.findFirst({
+        where: { isActive: true },
+        orderBy: { createdAt: 'asc' }
+      });
+
+      if (!tenant) {
+        try {
+          tenant = await prisma.tenant.create({
+            data: {
+              name: 'WellBe Platform',
+              email: 'support@wellbe.com',
+              isActive: true,
+              category: 'Platform',
+              shortDescription: 'Default tenant for client accounts'
+            }
+          });
+
+          await prisma.tenantSettings.create({
+            data: {
+              tenantId: tenant.id,
+              onlineReservationEnabled: true,
+              showMap: true,
+              showOpeningHours: true,
+              showReviews: true
+            }
+          });
+        } catch (tenantError: any) {
+          tenant = await prisma.tenant.findFirst({
+            where: { isActive: true },
+            orderBy: { createdAt: 'asc' }
+          });
+
+          if (!tenant) {
+            fail(500, {
+              error: 'System setup required',
+              message: 'Unable to initialize the system. Please contact support.'
+            });
+          }
+        }
+      }
+
+      // Create client
+      const nameParts = clientEmail.split('@')[0].split('.');
+      client = await prisma.client.create({
+        data: {
+          tenantId: tenant.id,
+          firstName: nameParts[0] || 'User',
+          lastName: nameParts.slice(1).join(' ') || '',
+          email: clientEmail.trim().toLowerCase(),
+          phone: '',
+          status: 'ACTIVE'
+        }
+      });
+    }
+
+    // Verify tenant exists
+    const tenant = await prisma.tenant.findFirst({
+      where: {
+        OR: [
+          { subdomain: tenantId },
+          { domain: tenantId },
+          { id: tenantId }
+        ],
+        isActive: true
+      }
+    });
+
+    if (!tenant) {
+      fail(404, {
+        error: 'Tenant not found',
+        message: 'The requested salon was not found.'
+      });
+    }
+
+    // Check if favorite already exists
+    const existingFavorite = await (prisma as any).favorite.findUnique({
+      where: {
+        clientId_tenantId: {
+          clientId: client.id,
+          tenantId: tenant.id
+        }
+      }
+    });
+
+    if (existingFavorite) {
+      return {
+        favorite: existingFavorite,
+        message: 'Already in favorites'
+      };
+    }
+
+    // Create favorite
+    const favorite = await (prisma as any).favorite.create({
+      data: {
+        clientId: client.id,
+        tenantId: tenant.id
+      },
+      include: {
+        tenant: {
+          select: {
+            id: true,
+            name: true,
+            logo: true,
+            coverImage: true,
+            address: true,
+            city: true,
+            category: true,
+            shortDescription: true
+          }
+        }
+      }
+    });
+
+    fail(201, {
+      favorite: {
+        id: favorite.id,
+        tenantId: favorite.tenantId,
+        tenant: favorite.tenant,
+        createdAt: favorite.createdAt
+      },
+      message: 'Added to favorites'
+    });
+  } catch (error: any) {
+    if (error.code === 'P2002') {
+      // Unique constraint violation - already favorited
+      return {
+        message: 'Already in favorites'
+      };
+    }
+    throw error;
+  }
+  }
+
+  async removeFavorite(id: string, query: Record<string, unknown>) {
+    try {
+    const { clientEmail } = query;
+
+    if (!clientEmail) {
+      fail(400, {
+        error: 'Client email required',
+        message: 'Please provide clientEmail as a query parameter.'
+      });
+    }
+
+    // Find client by email
+    const client = await prisma.client.findFirst({
+      where: {
+        email: decodeURIComponent(clientEmail as string)
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    if (!client) {
+      fail(404, {
+        error: 'Client not found',
+        message: 'The client was not found.'
+      });
+    }
+
+    // Verify favorite belongs to this client
+    const favorite = await (prisma as any).favorite.findFirst({
+      where: {
+        id,
+        clientId: client.id
+      }
+    });
+
+    if (!favorite) {
+      fail(404, {
+        error: 'Favorite not found',
+        message: 'The favorite was not found or does not belong to this client.'
+      });
+    }
+
+    await (prisma as any).favorite.delete({
+      where: { id }
+    });
+
+    return { message: 'Favorite removed successfully' };
+  } catch (error) {
+    throw error;
+  }
+  }
+
+}
+
+export const favoritesService = new FavoritesService();

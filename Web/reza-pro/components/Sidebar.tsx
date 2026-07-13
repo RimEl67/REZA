@@ -1,0 +1,1345 @@
+'use client';
+
+import Link from 'next/link';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Home, Trash2, Users, Settings, File, BarChart3, LogOut, Settings2, ChevronRight, LayoutPanelLeft, Calendar, Clock, Filter, UserCheck, Building, TrendingUp, FileText, ChevronDown, Bell, Menu, CreditCard, LifeBuoy, X } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { useEffect, useState, useRef } from 'react';
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
+import { api } from '@/lib/api';
+import ConfirmDialog from '@/components/ConfirmDialog';
+
+const menuItems = [
+	{ name: 'Agenda', href: '/dashboard/rendez-vous', icon: Home },
+	{ name: 'Clients', href: '/dashboard/clients/fichier-client/gestion', icon: Users },
+	{ name: 'Caisse', href: '/dashboard/caisse', icon: CreditCard },
+	{ name: 'Horaires', href: '/dashboard/admin/param-etablissement/gestion-horaires-delais', icon: Clock },
+	{ name: 'Admin', href: '/dashboard/admin/param-agenda/gestion-de-prestations', icon: Settings2 },
+];
+
+// Sidebar content components remain the same
+const RendezVousSidebar = () => {
+	const { isAuthenticated } = useAuth();
+	const [mounted, setMounted] = useState(false);
+	const [selectedDate, setSelectedDate] = useState(() => {
+		const date = new Date();
+		date.setHours(0, 0, 0, 0);
+		return date;
+	});
+	const [selectedEmployee, setSelectedEmployee] = useState('all');
+	const [statusFilter, setStatusFilter] = useState('all');
+	const [monthYear, setMonthYear] = useState('');
+	const [employees, setEmployees] = useState<Array<{id: string, name: string, color: string}>>([]);
+	const [appointmentsByDate, setAppointmentsByDate] = useState<Record<string, number>>({});
+	const [loading, setLoading] = useState(false);
+
+	// Fetch employees from API
+	useEffect(() => {
+		if (!isAuthenticated) return;
+		
+		const fetchEmployees = async () => {
+			try {
+				setLoading(true);
+				const response = await api.getEmployees({ active: true });
+				const employeesData = response.employees || [];
+				
+				const transformed = employeesData.map((emp: any) => {
+					const agendaSettings = emp.agendaSettings || {};
+					const name = `${emp.firstName} ${emp.lastName}`;
+					const color = agendaSettings.color || '#3B82F6';
+					return { id: emp.id, name, color };
+				});
+				
+				// Add "Tous" option at the beginning
+				setEmployees([{ id: 'all', name: 'Tous', color: '#3B82F6' }, ...transformed]);
+			} catch (err) {
+				console.error('Error fetching employees:', err);
+				// Fallback to empty array
+				setEmployees([{ id: 'all', name: 'Tous', color: '#3B82F6' }]);
+			} finally {
+				setLoading(false);
+			}
+		};
+		
+		fetchEmployees();
+	}, [isAuthenticated]);
+	
+	// Fetch appointments for the current month to show counts
+	useEffect(() => {
+		if (!isAuthenticated || !mounted) return;
+		
+		const fetchAppointments = async () => {
+			try {
+				const monthStart = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+				monthStart.setHours(0, 0, 0, 0);
+				const monthEnd = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0);
+				monthEnd.setHours(23, 59, 59, 999);
+				
+				const response = await api.getAppointments({
+					startDate: monthStart.toISOString(),
+					endDate: monthEnd.toISOString(),
+					limit: 1000
+				});
+				
+				const appointments = response.appointments || [];
+				const counts: Record<string, number> = {};
+				
+				appointments.forEach((apt: any) => {
+					const date = new Date(apt.startTime);
+					const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+					counts[dateKey] = (counts[dateKey] || 0) + 1;
+				});
+				
+				setAppointmentsByDate(counts);
+			} catch (err) {
+				console.error('Error fetching appointments:', err);
+			}
+		};
+		
+		fetchAppointments();
+	}, [isAuthenticated, mounted, selectedDate]);
+	
+	useEffect(() => {
+		setMounted(true);
+		
+		// Listen for main calendar date changes
+		const handleMainCalendarDateChange = (event: CustomEvent) => {
+			setSelectedDate(new Date(event.detail));
+		};
+		
+		window.addEventListener('mainCalendarDateChange', handleMainCalendarDateChange as EventListener);
+		
+		return () => {
+			window.removeEventListener('mainCalendarDateChange', handleMainCalendarDateChange as EventListener);
+		};
+	}, []);
+
+	useEffect(() => {
+		if (mounted) {
+			setMonthYear(selectedDate.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }));
+		}
+	}, [selectedDate, mounted]);
+
+	const getDaysInMonth = () => {
+		const year = selectedDate.getFullYear();
+		const month = selectedDate.getMonth();
+		const firstDay = new Date(year, month, 1).getDay();
+		const daysInMonth = new Date(year, month + 1, 0).getDate();
+		const adjustedFirstDay = firstDay === 0 ? 6 : firstDay - 1;
+		
+		const days = [];
+		for (let i = 0; i < adjustedFirstDay; i++) {
+			days.push(null);
+		}
+		for (let i = 1; i <= daysInMonth; i++) {
+			days.push(i);
+		}
+		return days;
+	};
+
+	const handleDayClick = (day: number | null) => {
+		if (!day) return;
+		const year = selectedDate.getFullYear();
+		const month = selectedDate.getMonth();
+		const newDate = new Date(year, month, day);
+		newDate.setHours(0, 0, 0, 0);
+		setSelectedDate(newDate);
+		window.dispatchEvent(new CustomEvent('sidebarDateChange', { detail: newDate }));
+	};
+
+	const changeMonth = (delta: number) => {
+		setSelectedDate(new Date(selectedDate.getFullYear(), selectedDate.getMonth() + delta, 1));
+	};
+
+	const goToToday = () => {
+		setSelectedDate(new Date());
+	};
+
+	if (!mounted) {
+		return (
+			<div className="flex-1 overflow-y-auto p-4">
+				<div className="space-y-4">
+					<div className="animate-pulse bg-gray-200 h-64 rounded-xl"></div>
+				</div>
+			</div>
+		);
+	}
+
+	return (
+		<div className="flex-1 overflow-y-auto p-6">
+			<div className="space-y-6">
+				<div className="bg-white">
+					<div className="flex items-center justify-between mb-4">
+						<button
+							onClick={() => changeMonth(-1)}
+							className="p-1 hover:bg-gray-100 rounded transition-all"
+						>
+							<ChevronDown size={16} className="rotate-90 text-gray-600" />
+						</button>
+						<h3 className="text-sm font-semibold text-gray-900">
+							{monthYear}
+						</h3>
+						<button
+							onClick={() => changeMonth(1)}
+							className="p-1 hover:bg-gray-100 rounded transition-all"
+						>
+							<ChevronDown size={16} className="-rotate-90 text-gray-600" />
+						</button>
+					</div>
+					<div className="grid grid-cols-7 gap-1 mb-2">
+						{['L', 'M', 'M', 'J', 'V', 'S', 'D'].map((day, i) => (
+							<div key={i} className="text-center text-xs font-medium text-gray-500 py-1">
+								{day}
+							</div>
+						))}
+					</div>
+					<div className="grid grid-cols-7 gap-1">
+						{getDaysInMonth().map((day, i) => {
+							const isSelected = day === selectedDate.getDate();
+							const dateKey = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+							const appointmentCount = appointmentsByDate[dateKey] || 0;
+							
+							return day ? (
+								<button
+									key={i}
+									onClick={() => handleDayClick(day)}
+									className={`aspect-square rounded-md text-xs font-medium transition-all relative ${
+										isSelected
+											? 'bg-[#4ADE80] text-white'
+											: 'text-gray-700 hover:bg-gray-100'
+									}`}
+								>
+									{day}
+									{appointmentCount > 0 && (
+										<span className={`absolute bottom-0.5 left-1/2 transform -translate-x-1/2 w-1 h-1 rounded-full ${
+											isSelected ? 'bg-white' : 'bg-[#002366]'
+										}`}></span>
+									)}
+								</button>
+							) : (
+								<div key={i} className="aspect-square"></div>
+							);
+						})}
+					</div>
+				</div>
+
+				<div className="space-y-3">
+					<h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2">
+						<UserCheck size={14} />
+						Employés
+					</h3>
+					{loading ? (
+						<div className="flex items-center justify-center py-4">
+							<div className="animate-pulse text-xs text-gray-400">Chargement...</div>
+						</div>
+					) : employees.length > 10 ? (
+						<Select value={selectedEmployee} onValueChange={value => {
+							setSelectedEmployee(value);
+							window.dispatchEvent(new CustomEvent('employeeFilterChange', { detail: value }));
+						}}>
+							<SelectTrigger className="w-full px-4 py-2 rounded-full bg-gray-50 border border-gray-200 text-sm mt-2">
+								<SelectValue placeholder="Sélectionner l'employé" />
+							</SelectTrigger>
+							<SelectContent>
+								{employees.map((employee) => (
+									<SelectItem key={employee.id} value={employee.id === 'all' ? 'all' : employee.name}>
+										<div className="flex items-center gap-2">
+											<div 
+												className="w-3 h-3 rounded-full" 
+												style={{ backgroundColor: employee.color }}
+											></div>
+											{employee.name}
+										</div>
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					) : (
+						<div className="flex flex-wrap gap-2">
+							{employees.map((employee) => {
+								const value = employee.id === 'all' ? 'all' : employee.name;
+								const isSelected = (employee.id === 'all' && selectedEmployee === 'all') || selectedEmployee === employee.name;
+								return (
+									<button
+										key={employee.id}
+										onClick={() => {
+											setSelectedEmployee(value);
+											window.dispatchEvent(new CustomEvent('employeeFilterChange', { detail: value }));
+										}}
+										className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 hover:scale-105 flex items-center gap-1.5 ${
+											isSelected
+												? 'bg-[#002366] text-white'
+												: 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+										}`}
+									>
+										{employee.id !== 'all' && (
+											<div 
+												className="w-2 h-2 rounded-full" 
+												style={{ backgroundColor: employee.color }}
+											></div>
+										)}
+										{employee.name}
+									</button>
+								);
+							})}
+						</div>
+					)}
+				</div>
+
+				<div className="space-y-3">
+					<h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2">
+						<Filter size={14} />
+						Statut
+					</h3>
+					<div className="flex flex-wrap gap-2">
+						{[
+							{ value: 'all', label: 'Tous', color: 'gray' },
+							{ value: 'confirmed', label: 'Confirmé', color: 'green' },
+							{ value: 'pending', label: 'En attente', color: 'yellow' },
+							{ value: 'in_progress', label: 'En cours', color: 'blue' },
+							{ value: 'completed', label: 'Terminé', color: 'emerald' },
+							{ value: 'cancelled', label: 'Annulé', color: 'red' },
+							{ value: 'no_show', label: 'Absent', color: 'orange' }
+						].map((status) => (
+							<button
+								key={status.value}
+								onClick={() => {
+									setStatusFilter(status.value);
+									// Dispatch event for the rendez-vous page to listen to
+									window.dispatchEvent(new CustomEvent('statusFilterChange', { detail: status.value }));
+								}}
+								className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 hover:scale-105 ${
+									statusFilter === status.value
+										? status.color === 'gray'
+											? 'bg-[#002366] text-white'
+											: status.color === 'green'
+											? 'bg-[#002366] text-white'
+											: status.color === 'yellow'
+											? 'bg-[#002366] text-white'
+											: 'bg-[#002366] text-white'
+										: 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+								}`}
+							>
+								{status.label}
+							</button>
+						))}
+					</div>
+				</div>
+			</div>
+		</div>
+	);
+};
+
+const ClientsSidebar = () => {
+	const [mounted, setMounted] = useState(false);
+	const [showFichierClient, setShowFichierClient] = useState(true);
+	const [showMesAvis, setShowMesAvis] = useState(false);
+	const [showStatistiquesClients, setShowStatistiquesClients] = useState(false);
+	const pathname = usePathname();
+
+	const menuItems = {
+		fichier: [
+			{ label: 'Gestion', path: '/dashboard/clients/fichier-client/gestion' },
+			{ label: 'Doublons', path: '/dashboard/clients/fichier-client/doublons' }
+		],
+		avis: [
+			{ label: 'Avis à modérer', path: '/dashboard/clients/mes-avis/avis-a-moderer' },
+			{ label: 'Avis modérés', path: '/dashboard/clients/mes-avis/avis-moderes' },
+			{ label: 'Avis refusés', path: '/dashboard/clients/mes-avis/avis-refuses' },
+			{ label: 'Statistiques avis', path: '/dashboard/clients/mes-avis/statistiques-avis' }
+		],
+		stats: [
+			{ label: '100 meilleurs clients', path: '/dashboard/clients/statistiques/meilleurs-clients' },
+			{ label: 'Nouveaux clients', path: '/dashboard/clients/statistiques/nouveaux-clients' },
+			{ label: 'Fréquences globales', path: '/dashboard/clients/statistiques/frequences-globales' }
+		]
+	};
+
+	useEffect(() => {
+		setMounted(true);
+	}, []);
+
+	if (!mounted) {
+		return (
+			<div className="flex-1 overflow-y-auto p-6">
+				<div className="space-y-6">
+					<div className="animate-pulse bg-gray-200 h-64 rounded-xl"></div>
+				</div>
+			</div>
+		);
+	}
+
+	return (
+		<div className="flex-1 overflow-y-auto p-6">
+			<div className="space-y-6">
+				{/* Fichier Client */}
+				<div className="space-y-3">
+					<button
+						onClick={() => setShowFichierClient(!showFichierClient)}
+						className="w-full flex items-center justify-between group"
+					>
+						<h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2 group-hover:text-gray-900 transition-colors">
+							<FileText size={14} />
+							Fichier Client
+						</h3>
+						<ChevronDown size={14} className={`text-gray-500 transition-transform ${showFichierClient ? 'rotate-180' : ''}`} />
+					</button>
+					{showFichierClient && (
+						<div className="space-y-1 animate-fadeIn">
+							{menuItems.fichier.map((item) => (
+								<Link
+									key={item.path}
+									href={item.path}
+									className={`block w-full px-3 py-2 text-left text-sm rounded-full transition-all ${
+										pathname === item.path ? 'bg-[#002366] text-white' : 'text-gray-700 hover:bg-gray-100'
+									}`}
+								>
+									{item.label}
+								</Link>
+							))}
+						</div>
+					)}
+				</div>
+
+				{/* Mes Avis */}
+				<div className="space-y-3">
+					<button
+						onClick={() => setShowMesAvis(!showMesAvis)}
+						className="w-full flex items-center justify-between group"
+					>
+						<h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2 group-hover:text-gray-900 transition-colors">
+							<UserCheck size={14} />
+							Mes Avis
+						</h3>
+						<ChevronDown size={14} className={`text-gray-500 transition-transform ${showMesAvis ? 'rotate-180' : ''}`} />
+					</button>
+					{showMesAvis && (
+						<div className="space-y-1 animate-fadeIn">
+							{menuItems.avis.map((item) => (
+								<Link
+								key={item.path}
+									href={item.path}
+									className={`block w-full px-3 py-2 text-left text-sm rounded-full transition-all ${
+										pathname === item.path ? 'bg-[#002366] text-white' : 'text-gray-700 hover:bg-gray-100'
+									}`}
+								>
+									{item.label}
+								</Link>
+							))}
+						</div>
+					)}
+				</div>
+
+				{/* Statistiques Clients */}
+				<div className="space-y-3">
+					<button
+						onClick={() => setShowStatistiquesClients(!showStatistiquesClients)}
+						className="w-full flex items-center justify-between group"
+					>
+						<h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2 group-hover:text-gray-900 transition-colors">
+							<TrendingUp size={14} />
+							Statistiques Clients
+						</h3>
+						<ChevronDown size={14} className={`text-gray-500 transition-transform ${showStatistiquesClients ? 'rotate-180' : ''}`} />
+					</button>
+					{showStatistiquesClients && (
+						<div className="space-y-1 animate-fadeIn">
+							{menuItems.stats.map((item) => (
+								<Link
+								key={item.path}
+									href={item.path}
+									className={`block w-full px-3 py-2 text-left text-sm rounded-full transition-all ${
+										pathname === item.path ? 'bg-[#002366] text-white' : 'text-gray-700 hover:bg-gray-100'
+									}`}
+								>
+									{item.label}
+								</Link>
+							))}
+						</div>
+					)}
+				</div>
+			</div>
+		</div>
+	);
+};
+
+const AdminSidebar = () => {
+	const [mounted, setMounted] = useState(false);
+	const [showParamAgenda, setShowParamAgenda] = useState(true);
+	const [showParamEtablissement, setShowParamEtablissement] = useState(false);
+	const [showStatistiquesRDV, setShowStatistiquesRDV] = useState(false);
+	const [showTauxOccupation, setShowTauxOccupation] = useState(false);
+	const [showCorbeilleRDV, setShowCorbeilleRDV] = useState(false);
+	const [showMesFactures, setShowMesFactures] = useState(false);
+	const [showFicheClients, setShowFicheClients] = useState(false);
+	const pathname = usePathname();
+
+	const paramAgendaLinks = [
+	    { label: 'Gestion de prestations', path: '/dashboard/admin/param-agenda/gestion-de-prestations' },
+		{ label: 'Gestion des agendas', path: '/dashboard/admin/param-agenda/gestion-des-agendas' },
+		{ label: 'Gestion affichage RDV', path: '/dashboard/admin/param-agenda/gestion-affichage-rdv' },
+	];
+
+	const paramEtablissementLinks = [
+		{ label: 'Informations Landing Page', path: '/dashboard/admin/param-etablissement/informations-landing-page' },
+		{ label: 'Descriptif établissement', path: '/dashboard/admin/param-etablissement/descriptif-etablissement' },
+		{ label: 'Gestion photos', path: '/dashboard/admin/param-etablissement/gestion-photos' },
+		{ label: 'Gestion horaires et délais', path: '/dashboard/admin/param-etablissement/gestion-horaires-delais' },
+		{ label: 'Gestion liste d\'attente', path: '/dashboard/admin/param-etablissement/gestion-liste-attente' },
+		{ label: 'Gestion messages', path: '/dashboard/admin/param-etablissement/gestion-message' },
+		{ label: 'Notifications RDV Web', path: '/dashboard/admin/param-etablissement/notifications-rdv-web' },
+	];
+
+	const statistiquesRDVLinks = [
+	    { label: 'Indicateurs clés', path: '/dashboard/admin/statistiques-rdv/indicateurs-cles' },
+	    { label: 'Autres indicateurs', path: '/dashboard/admin/statistiques-rdv/autres' },
+	    { label: 'Prestations', path: '/dashboard/admin/statistiques-rdv/prestations' },
+	    { label: 'Collaborateurs', path: '/dashboard/admin/statistiques-rdv/collaborateurs' },
+	    { label: 'RDV', path: '/dashboard/admin/statistiques-rdv/rdv' },
+	    { label: 'RDV pas venus', path: '/dashboard/admin/statistiques-rdv/rdv-pas-venus' },
+	];
+
+	useEffect(() => {
+		setMounted(true);
+		// Auto-expand sections based on current path
+		if (pathname?.startsWith('/dashboard/admin/param-etablissement')) {
+			setShowParamEtablissement(true);
+		}
+		if (pathname?.startsWith('/dashboard/admin/param-agenda')) {
+			setShowParamAgenda(true);
+		}
+		if (pathname?.startsWith('/dashboard/admin/statistiques-rdv')) {
+			setShowStatistiquesRDV(true);
+		}
+		if (pathname?.startsWith('/dashboard/admin/fiche-clients')) {
+			setShowFicheClients(true);
+		}
+		if (pathname?.startsWith('/dashboard/admin/taux-occupation')) {
+			setShowTauxOccupation(true);
+		}
+		if (pathname?.startsWith('/dashboard/admin/corbeille-rdv')) {
+			setShowCorbeilleRDV(true);
+		}
+		if (pathname?.startsWith('/dashboard/admin/mes-factures')) {
+			setShowMesFactures(true);
+		}
+	}, [pathname]);
+
+	if (!mounted) {
+		return (
+			<div className="flex-1 overflow-y-auto p-6">
+				<div className="space-y-6">
+					<div className="animate-pulse bg-gray-200 h-64 rounded-xl"></div>
+				</div>
+			</div>
+		);
+	}
+
+	return (
+		<div className="flex-1 overflow-y-auto p-6">
+			<div className="space-y-6">
+				{/* Paramétrage Agenda */}
+				<div className="space-y-3">
+					<button
+						onClick={() => setShowParamAgenda(!showParamAgenda)}
+						className="w-full flex items-center justify-between group"
+					>
+						<h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2 group-hover:text-gray-900 transition-colors">
+							<Settings2 size={14} />
+							Agenda
+						</h3>
+						<ChevronDown size={14} className={`text-gray-500 transition-transform ${showParamAgenda ? 'rotate-180' : ''}`} />
+					</button>
+					{showParamAgenda && (
+						<div className="space-y-1 animate-fadeIn">
+							{paramAgendaLinks.map((item) => (
+								<Link
+									key={item.path}
+									href={item.path}
+									className={`block w-full px-3 py-2 text-left text-sm rounded-full transition-all ${
+										pathname === item.path ? 'bg-[#002366] text-white' : 'text-gray-700 hover:bg-gray-100'
+									}`}
+								>
+									{item.label}
+								</Link>
+							))}
+						</div>
+					)}
+				</div>
+
+				{/* Paramètre Établissement */}
+				<div className="space-y-3">
+					<button
+						onClick={() => setShowParamEtablissement(!showParamEtablissement)}
+						className="w-full flex items-center justify-between group"
+					>
+						<h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2 group-hover:text-gray-900 transition-colors">
+							<Settings2 size={14} />
+							Établissement
+						</h3>
+						<ChevronDown size={14} className={`text-gray-500 transition-transform ${showParamEtablissement ? 'rotate-180' : ''}`} />
+					</button>
+					{showParamEtablissement && (
+						<div className="space-y-1 animate-fadeIn">
+							{paramEtablissementLinks.map((item) => (
+								<Link
+									key={item.path}
+									href={item.path}
+									className={`block w-full px-3 py-2 text-left text-sm rounded-full transition-all ${
+										pathname === item.path ? 'bg-[#002366] text-white' : 'text-gray-700 hover:bg-gray-100'
+									}`}
+								>
+									{item.label}
+								</Link>
+							))}
+						</div>
+					)}
+				</div>
+
+
+				{/* Statistiques RDV (new section at the bottom) */}
+				<div className="space-y-3">
+                    <button
+                        onClick={() => setShowStatistiquesRDV(!showStatistiquesRDV)}
+                        className="w-full flex items-center justify-between group"
+                    >
+                        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2 group-hover:text-gray-900 transition-colors">
+                            <BarChart3 size={14} />
+                            Statistiques RDV
+                        </h3>
+                        <ChevronDown size={14} className={`text-gray-500 transition-transform ${showStatistiquesRDV ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showStatistiquesRDV && (
+                        <div className="space-y-1 animate-fadeIn">
+                            {statistiquesRDVLinks.map((item) => (
+                                <Link
+                                    key={item.path}
+                                    href={item.path}
+                                    className={`block w-full px-3 py-2 text-left text-sm rounded-full transition-all ${pathname === item.path ? 'bg-[#002366] text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+                                >
+                                    {item.label}
+                                </Link>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Taux d'occupation Section */}
+                <div className="space-y-3">
+                    <button
+                        onClick={() => setShowTauxOccupation(!showTauxOccupation)}
+                        className="w-full flex items-center justify-between group"
+                    >
+                        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2 group-hover:text-gray-900 transition-colors">
+                            <TrendingUp size={14} />
+                            Taux d'occupation
+                        </h3>
+                        <ChevronDown size={14} className={`text-gray-500 transition-transform ${showTauxOccupation ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showTauxOccupation && (
+                        <div className="space-y-1 animate-fadeIn">
+                            <Link
+                                href="/dashboard/admin/taux-occupation/vue-ensemble"
+                                className={`block w-full px-3 py-2 text-left text-sm rounded-full transition-all ${pathname === '/dashboard/admin/taux-occupation/vue-ensemble' ? 'bg-[#002366] text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+                            >
+                                Vue d'ensemble
+                            </Link>
+                            <Link
+                                href="/dashboard/admin/taux-occupation/collaborateurs"
+                                className={`block w-full px-3 py-2 text-left text-sm rounded-full transition-all ${pathname === '/dashboard/admin/taux-occupation/collaborateurs' ? 'bg-[#002366] text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+                            >
+                                Collaborateurs
+                            </Link>
+                            <Link
+                                href="/dashboard/admin/taux-occupation/prestations"
+                                className={`block w-full px-3 py-2 text-left text-sm rounded-full transition-all ${pathname === '/dashboard/admin/taux-occupation/prestations' ? 'bg-[#002366] text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+                            >
+                                Prestations
+                            </Link>
+                        </div>
+                    )}
+                </div>
+
+                {/* Corbeille RDV Section */}
+                <div className="space-y-3">
+                    <button
+                        onClick={() => setShowCorbeilleRDV(!showCorbeilleRDV)}
+                        className="w-full flex items-center justify-between group"
+                    >
+                        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2 group-hover:text-gray-900 transition-colors">
+                            <Trash2 size={14} />
+                            Corbeille RDV
+                        </h3>
+                        <ChevronDown size={14} className={`text-gray-500 transition-transform ${showCorbeilleRDV ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showCorbeilleRDV && (
+                        <div className="space-y-1 animate-fadeIn">
+                            <Link
+                                href="/dashboard/admin/corbeille-rdv/rdv-annules"
+                                className={`block w-full px-3 py-2 text-left text-sm rounded-full transition-all ${pathname === '/dashboard/admin/corbeille-rdv/rdv-annules' ? 'bg-[#002366] text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+                            >
+                                RDV annulés
+                            </Link>
+                        </div>
+                    )}
+                </div>
+
+				{/* Fiche Clients Section */}
+				<div className="space-y-3">
+					<button
+						onClick={() => setShowFicheClients(!showFicheClients)}
+						className="w-full flex items-center justify-between group"
+					>
+						<h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2 group-hover:text-gray-900 transition-colors">
+							<Users size={14} />
+							Fiche Clients
+						</h3>
+						<ChevronDown size={14} className={`text-gray-500 transition-transform ${showFicheClients ? 'rotate-180' : ''}`} />
+					</button>
+					{showFicheClients && (
+						<div className="space-y-1 animate-fadeIn">
+							<Link
+								href="/dashboard/admin/fiche-clients/gestion-fiche-clients"
+								className={`block w-full px-3 py-2 text-left text-sm rounded-full transition-all ${pathname === '/dashboard/admin/fiche-clients/gestion-fiche-clients' ? 'bg-[#002366] text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+							>
+								Gestion fiche clients
+							</Link>
+						</div>
+					)}
+				</div>
+
+				{/* Mes factures Section */}
+				<div className="space-y-3">
+					<button
+						onClick={() => setShowMesFactures(!showMesFactures)}
+						className="w-full flex items-center justify-between group"
+					>
+						<h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2 group-hover:text-gray-900 transition-colors">
+							<File size={14} />
+							Mes factures
+						</h3>
+						<ChevronDown size={14} className={`text-gray-500 transition-transform ${showMesFactures ? 'rotate-180' : ''}`} />
+					</button>
+					{showMesFactures && (
+						<div className="space-y-1 animate-fadeIn">
+							<Link
+								href="/dashboard/admin/mes-factures/moyen-de-paiement"
+								className={`block w-full px-3 py-2 text-left text-sm rounded-full transition-all ${pathname === '/dashboard/admin/mes-factures/moyen-de-paiement' ? 'bg-[#002366] text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+							>
+								Moyen de paiement
+							</Link>
+							<Link
+								href="/dashboard/admin/mes-factures/liste-des-factures"
+								className={`block w-full px-3 py-2 text-left text-sm rounded-full transition-all ${pathname === '/dashboard/admin/mes-factures/liste-des-factures' ? 'bg-[#002366] text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+							>
+								Liste des factures
+							</Link>
+						</div>
+					)}
+				</div>
+			</div>
+		</div>
+	);
+};
+
+const CaisseSidebar = ({
+  methodFilter,
+  setMethodFilter,
+  typeFilter,
+  setTypeFilter,
+  selectedPeriod,
+  setSelectedPeriod
+}: {
+  methodFilter: string;
+  setMethodFilter: (v: string) => void;
+  typeFilter: string;
+  setTypeFilter: (v: string) => void;
+  selectedPeriod: string;
+  setSelectedPeriod: (v: string) => void;
+}) => {
+  return (
+    <div className="flex-1 overflow-y-auto p-6">
+      <div className="space-y-6">
+        <div className="space-y-3">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2">
+            <CreditCard size={14} />
+            Filtres Caisse
+          </h3>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs text-gray-500 mb-2">Méthode</label>
+              <Select value={methodFilter} onValueChange={setMethodFilter}>
+                <SelectTrigger className="w-full px-4 py-2 rounded-full bg-gray-50 border border-gray-200 text-sm mt-2">
+                  <SelectValue placeholder="Sélectionner la méthode" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Toutes</SelectItem>
+                  <SelectItem value="Espèces">Espèces</SelectItem>
+                  <SelectItem value="Carte">Carte</SelectItem>
+                  <SelectItem value="Virement">Virement</SelectItem>
+                  <SelectItem value="Chèque">Chèque</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-2">Type</label>
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger className="w-full px-4 py-2 rounded-full bg-gray-50 border border-gray-200 text-sm mt-2">
+                  <SelectValue placeholder="Sélectionner le type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous</SelectItem>
+                  <SelectItem value="Vente">Vente</SelectItem>
+                  <SelectItem value="Remboursement">Remboursement</SelectItem>
+                  <SelectItem value="Dépôt">Dépôt</SelectItem>
+                  <SelectItem value="Retrait">Retrait</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-2">Période</label>
+              <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
+                <SelectTrigger className="w-full px-4 py-2 rounded-full bg-gray-50 border border-gray-200 text-sm mt-2">
+                  <SelectValue placeholder="Sélectionner la période" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="day">Aujourd'hui</SelectItem>
+                  <SelectItem value="week">Cette semaine</SelectItem>
+                  <SelectItem value="month">Ce mois</SelectItem>
+                  <SelectItem value="all">Tout</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default function Sidebar() {
+	const pathname = usePathname();
+	const { logout, user, isAuthenticated } = useAuth();
+	const [mounted, setMounted] = useState(false);
+	const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+	const router = useRouter();
+	const searchParams = useSearchParams();
+	
+	// Initialize filters from URL params or default to 'all'
+	const [caisseMethodFilter, setCaisseMethodFilter] = useState(() => {
+		return searchParams?.get('method') || 'all';
+	});
+	const [caisseTypeFilter, setCaisseTypeFilter] = useState(() => {
+		return searchParams?.get('type') || 'all';
+	});
+	const [caissePeriod, setCaissePeriod] = useState(() => {
+		return searchParams?.get('period') || 'all';
+	});
+	
+	// Update URL when filters change (only for caisse page)
+	// This is a one-way sync: sidebar -> URL
+	useEffect(() => {
+		if (pathname?.startsWith('/dashboard/caisse')) {
+			const params = new URLSearchParams();
+			if (caisseMethodFilter !== 'all') {
+				params.set('method', caisseMethodFilter);
+			}
+			if (caisseTypeFilter !== 'all') {
+				params.set('type', caisseTypeFilter);
+			}
+			if (caissePeriod !== 'all') {
+				params.set('period', caissePeriod);
+			}
+			const newParams = params.toString();
+			const newUrl = newParams ? `${pathname}?${newParams}` : pathname;
+			router.replace(newUrl, { scroll: false });
+		}
+	}, [caisseMethodFilter, caisseTypeFilter, caissePeriod, pathname, router]);
+
+	// Notification sidebar state
+	const [showNotificationSidebar, setShowNotificationSidebar] = useState(false);
+	const [notificationTab, setNotificationTab] = useState<'all' | 'unread'>('all');
+	const notificationSidebarRef = useRef<HTMLDivElement>(null);
+	const [notifications, setNotifications] = useState<any[]>([]);
+	const [groupedNotifications, setGroupedNotifications] = useState<any>({});
+	const [unreadCount, setUnreadCount] = useState(0);
+	const [loadingNotifications, setLoadingNotifications] = useState(false);
+
+	const [profileImage, setProfileImage] = useState<string | null>(null);
+
+	useEffect(() => {
+		setMounted(true);
+	}, []);
+
+	useEffect(() => {
+		if (!showNotificationSidebar) return;
+		function handleClickOutside(event: MouseEvent) {
+			if (notificationSidebarRef.current && !notificationSidebarRef.current.contains(event.target as Node)) {
+				setShowNotificationSidebar(false);
+			}
+		}
+		document.addEventListener('mousedown', handleClickOutside);
+		return () => {
+			document.removeEventListener('mousedown', handleClickOutside);
+		};
+	}, [showNotificationSidebar]);
+
+	// Fetch notifications
+	useEffect(() => {
+		if (isAuthenticated) {
+			fetchNotifications();
+		}
+	}, [isAuthenticated, notificationTab, showNotificationSidebar]);
+
+	const fetchNotifications = async () => {
+		try {
+			setLoadingNotifications(true);
+			const response = await api.getNotifications({
+				unreadOnly: notificationTab === 'unread',
+				limit: 100
+			});
+			setNotifications(response.notifications || []);
+			setGroupedNotifications(response.grouped || {});
+			setUnreadCount(response.unreadCount || 0);
+		} catch (error) {
+			console.error('Error fetching notifications:', error);
+		} finally {
+			setLoadingNotifications(false);
+		}
+	};
+
+	const handleMarkAsRead = async (notificationId: string) => {
+		try {
+			await api.markNotificationAsRead(notificationId);
+			// Update local state
+			setNotifications(prev => prev.map(n => 
+				n.id === notificationId ? { ...n, isRead: true, readAt: new Date() } : n
+			));
+			setUnreadCount(prev => Math.max(0, prev - 1));
+		} catch (error) {
+			console.error('Error marking notification as read:', error);
+		}
+	};
+
+	const handleNotificationClick = async (notification: any) => {
+		// Mark as read if unread
+		if (!notification.isRead) {
+			await handleMarkAsRead(notification.id);
+		}
+
+		// Navigate to the notification link if it exists
+		if (notification.link) {
+			// Close the notification sidebar
+			setShowNotificationSidebar(false);
+			// Navigate to the link
+			router.push(notification.link);
+		}
+	};
+
+	const handleMarkAllAsRead = async () => {
+		try {
+			await api.markAllNotificationsAsRead();
+			// Update local state
+			setNotifications(prev => prev.map(n => ({ ...n, isRead: true, readAt: new Date() })));
+			setUnreadCount(0);
+		} catch (error) {
+			console.error('Error marking all notifications as read:', error);
+		}
+	};
+
+	// Helper function to get icon for notification type
+	const getNotificationIcon = (type: string) => {
+		switch (type) {
+			case 'APPOINTMENT_CONFIRMED':
+			case 'APPOINTMENT_CANCELLED':
+			case 'APPOINTMENT_REMINDER':
+				return Calendar;
+			case 'NEW_REVIEW':
+				return UserCheck;
+			case 'PAYMENT_RECEIVED':
+				return CreditCard;
+			case 'NEW_CLIENT':
+				return Users;
+			case 'INVOICE_GENERATED':
+				return FileText;
+			case 'SYSTEM_UPDATE':
+				return Building;
+			default:
+				return Bell;
+		}
+	};
+
+	// Helper function to format time ago
+	const formatTimeAgo = (date: Date | string) => {
+		const now = new Date();
+		const notificationDate = new Date(date);
+		const diffInSeconds = Math.floor((now.getTime() - notificationDate.getTime()) / 1000);
+		
+		if (diffInSeconds < 60) return 'Il y a quelques secondes';
+		if (diffInSeconds < 3600) return `Il y a ${Math.floor(diffInSeconds / 60)} minute${Math.floor(diffInSeconds / 60) > 1 ? 's' : ''}`;
+		if (diffInSeconds < 86400) return `Il y a ${Math.floor(diffInSeconds / 3600)} heure${Math.floor(diffInSeconds / 3600) > 1 ? 's' : ''}`;
+		if (diffInSeconds < 604800) return `Il y a ${Math.floor(diffInSeconds / 86400)} jour${Math.floor(diffInSeconds / 86400) > 1 ? 's' : ''}`;
+		
+		// Format date for older notifications
+		return notificationDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+	};
+
+	const handleLogout = () => {
+		setShowLogoutConfirm(true);
+	};
+
+	const confirmLogout = () => {
+		logout();
+		router.push('/login');
+	};
+
+	const getSidebarContent = () => {
+		if (pathname?.startsWith('/dashboard/admin')) {
+			return <AdminSidebar />;
+		} else if (pathname === '/dashboard' || pathname === '/dashboard/rendez-vous') {
+			return <RendezVousSidebar />;
+		} else if (pathname?.startsWith('/dashboard/clients')) {
+			return <ClientsSidebar />;
+		} else if (pathname?.startsWith('/dashboard/caisse')) {
+			return (
+				<CaisseSidebar
+					methodFilter={caisseMethodFilter}
+					setMethodFilter={setCaisseMethodFilter}
+					typeFilter={caisseTypeFilter}
+					setTypeFilter={setCaisseTypeFilter}
+					selectedPeriod={caissePeriod}
+					setSelectedPeriod={setCaissePeriod}
+				/>
+			);
+		}
+		return <RendezVousSidebar />;
+	};
+
+	return (
+		<>
+			{/* Modern Top Bar */}
+			<header className="fixed top-0 left-68 right-0 h-20 backdrop-blur-lg border-b border-gray-200/50 z-40">
+				<div className="h-full ml-0 px-8 flex items-center justify-between">
+					{/* Left Section - Navigation */}
+					<nav className="flex items-center gap-2">
+						{menuItems.map((item) => {
+							const Icon = item.icon;
+							// Make 'Clients' active for all /dashboard/clients routes
+							// Make 'Horaires' active for business hours page
+							const isActive = item.href === '/dashboard/clients'
+							  ? pathname?.startsWith('/dashboard/clients')
+							  : item.href === '/dashboard/admin/param-etablissement/gestion-horaires-delais'
+							  ? pathname === item.href
+							  : pathname === item.href;
+							return (
+								<Link
+									key={item.href}
+									href={item.href}
+									className={`relative px-5 py-2.5 rounded-full text-sm font-semibold transition-all duration-300 inline-flex items-center gap-2.5 ${
+										isActive
+											? 'bg-[#002366] text-white'
+											: 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+									}`}
+								>
+									<Icon size={18} strokeWidth={2.5} />
+									<span>{item.name}</span>
+								</Link>
+							);
+						})}
+					</nav>
+
+					{/* Right Section - Actions & Profile */}
+					<div className="flex items-center gap-3">
+						{/* Notifications */}
+						<button className="relative p-2.5 rounded-full text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all" onClick={() => setShowNotificationSidebar(true)}>
+							<Bell size={20} strokeWidth={2} />
+							<span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full"></span>
+						</button>
+						
+						{/* Divider */}
+						<div className="w-px h-8 bg-gray-200"></div>
+
+						{/* User Profile */}
+						<div className="flex items-center gap-3 pl-2">
+							<div className="text-right">
+								<p className="text-sm font-semibold text-gray-900 leading-tight">
+									{mounted ? (user?.firstName && user?.lastName ? `${user.firstName} ${user.lastName}` : user?.email || 'User') : ''}
+								</p>
+								<p className="text-xs text-gray-500 leading-tight mt-0.5">
+									{mounted ? user?.email || 'admin@example.com' : ''}
+								</p>
+							</div>
+							<div className="relative">
+								{profileImage ? (
+									<img src={profileImage} alt="Profile" className="w-10 h-10 rounded-full object-cover" />
+								) : (
+                                                                        <div className="w-10 h-10 rounded-full bg-[#002366] flex items-center justify-center">                                                                           
+                                                                        <span className="text-white font-semibold text-sm">                              
+                                                                        {mounted ? (user?.firstName?.charAt(0) || user?.email?.charAt(0).toUpperCase() || 'U') : ''}                                    
+                                                                        </span>
+									</div>
+								)}
+								<input
+									type="file"
+									accept="image/*"
+									className="absolute inset-0 w-10 h-10 opacity-0 cursor-pointer"
+									title="Changer la photo de profil"
+									onChange={e => {
+										const file = e.target.files?.[0];
+										if (file) {
+											const reader = new FileReader();
+											reader.onload = (ev) => {
+												setProfileImage(ev.target?.result as string);
+											};
+											reader.readAsDataURL(file);
+										}
+									}}
+								/>
+								<div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-white"></div>
+							</div>
+						</div>
+
+						{/* Logout */}
+						{mounted && (
+							<button
+								onClick={handleLogout}
+								className="p-2.5 rounded-full text-gray-600 hover:bg-red-50 hover:text-red-600 transition-all ml-1"
+								title="Se déconnecter"
+							>
+								<LogOut size={20} strokeWidth={2} />
+							</button>
+						)}
+					</div>
+				</div>
+			</header>
+
+			{/* Logout Confirmation Dialog */}
+			<ConfirmDialog
+				open={showLogoutConfirm}
+				onOpenChange={setShowLogoutConfirm}
+				onConfirm={confirmLogout}
+				title="Se déconnecter"
+				description="Êtes-vous sûr de vouloir vous déconnecter ?"
+				confirmText="Se déconnecter"
+				cancelText="Annuler"
+				variant="destructive"
+			/>
+
+			{/* Sidebar */}
+			<aside className="fixed left-0 top-0 w-66 bg-white h-screen flex flex-col border-r border-gray-200 z-50">
+				<div className="p-6 pb-4">
+					<div className="flex items-center justify-between">
+						<h1 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
+							<img src="/logos/logo-blue.svg" alt="Logo" className="w-6 h-6 ml-2" />
+
+							Reza Pro
+						</h1>
+						{/* <button className="p-2 rounded-md hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-300 transition-all" aria-label="Collapse sidebar">
+							<LayoutPanelLeft size={22} className="text-gray-400" />
+						</button>*/}
+					</div>
+				</div>
+
+				{getSidebarContent()}
+			</aside>
+
+			{/* Notification Sidebar (right) */}
+	{showNotificationSidebar && (
+		<>
+			
+			
+			<div ref={notificationSidebarRef} className="fixed top-0 right-0 h-screen w-[480px] bg-white shadow-lg z-50 transition-transform duration-300 animate-slideIn flex flex-col">
+				{/* Header - Ultra Minimalist */}
+				<div className="px-8 py-8 border-b border-gray-100">
+					<div className="flex items-start justify-between mb-6">
+						<div>
+							<h2 className="text-3xl font-light text-gray-900 tracking-tight">Notifications</h2>
+							<p className="text-sm text-gray-400 mt-1 font-light">{unreadCount} non lue{unreadCount !== 1 ? 's' : ''}</p>
+						</div>
+						<button 
+							onClick={() => setShowNotificationSidebar(false)} 
+							className="p-2 text-gray-400 hover:text-gray-900 transition-colors"
+						>
+							<X size={20} />
+						</button>
+					</div>
+
+					{/* Tabs */}
+					<div className="flex items-center gap-1">
+						<button
+							className={`px-4 py-1.5 text-xs font-medium transition-colors ${notificationTab === 'all' ? 'text-gray-900' : 'text-gray-400 hover:text-gray-600'}`}
+							onClick={() => setNotificationTab('all')}
+						>
+							Toutes
+						</button>
+						<span className="text-gray-300">/</span>
+						<button
+							className={`px-4 py-1.5 text-xs font-medium transition-colors ${notificationTab === 'unread' ? 'text-gray-900' : 'text-gray-400 hover:text-gray-600'}`}
+							onClick={() => setNotificationTab('unread')}
+						>
+							Non lues
+						</button>
+					</div>
+				</div>
+
+				{/* Notifications List */}
+				<div className="flex-1 overflow-y-auto">
+					{loadingNotifications ? (
+						<div className="px-8 py-12 text-center text-gray-400">
+							<p>Chargement des notifications...</p>
+						</div>
+					) : notifications.length === 0 ? (
+						<div className="px-8 py-12 text-center text-gray-400">
+							<p>Aucune notification</p>
+						</div>
+					) : (
+						<>
+							{/* Today Section */}
+							{groupedNotifications.today && groupedNotifications.today.length > 0 && (
+								<div className="px-8 py-6">
+									<p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-4">Aujourd'hui</p>
+									{groupedNotifications.today
+										.filter((n: any) => notificationTab === 'all' || !n.isRead)
+										.map((notification: any) => {
+											const Icon = getNotificationIcon(notification.type);
+											return (
+												<div
+													key={notification.id}
+													onClick={() => handleNotificationClick(notification)}
+													className={`group relative bg-white border border-gray-100 rounded-lg p-4 mb-2 hover:border-gray-200 hover:shadow-sm transition-all cursor-pointer ${notification.isRead ? 'opacity-60 hover:opacity-100' : ''}`}
+												>
+													{!notification.isRead && (
+														<div className="absolute top-4 right-4 w-1.5 h-1.5 bg-[#002366] rounded-full"></div>
+													)}
+													<div className={`flex gap-4 ${!notification.isRead ? 'pr-4' : ''}`}>
+														<div className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center flex-shrink-0">
+															<Icon size={16} className="text-gray-600" />
+														</div>
+														<div className="flex-1 min-w-0">
+															<p className="text-sm font-medium text-gray-900 mb-1">{notification.title}</p>
+															<p className="text-xs text-gray-500 leading-relaxed mb-2">{notification.message}</p>
+															<span className="text-xs text-gray-400 font-light">{formatTimeAgo(notification.createdAt)}</span>
+														</div>
+													</div>
+												</div>
+											);
+										})}
+								</div>
+							)}
+							
+							{/* Yesterday Section */}
+							{notificationTab === 'all' && groupedNotifications.yesterday && groupedNotifications.yesterday.length > 0 && (
+								<div className="px-8 py-6 border-t border-gray-100">
+									<p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-4">Hier</p>
+									{groupedNotifications.yesterday.map((notification: any) => {
+										const Icon = getNotificationIcon(notification.type);
+										return (
+											<div
+												key={notification.id}
+												onClick={() => handleNotificationClick(notification)}
+												className={`group relative bg-white border border-gray-100 rounded-lg p-4 mb-2 hover:border-gray-200 hover:shadow-sm transition-all cursor-pointer ${notification.isRead ? 'opacity-60 hover:opacity-100' : ''}`}
+											>
+												{!notification.isRead && (
+													<div className="absolute top-4 right-4 w-1.5 h-1.5 bg-[#002366] rounded-full"></div>
+												)}
+												<div className={`flex gap-4 ${!notification.isRead ? 'pr-4' : ''}`}>
+													<div className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center flex-shrink-0">
+														<Icon size={16} className="text-gray-600" />
+													</div>
+													<div className="flex-1 min-w-0">
+														<p className="text-sm font-medium text-gray-900 mb-1">{notification.title}</p>
+														<p className="text-xs text-gray-500 leading-relaxed mb-2">{notification.message}</p>
+														<span className="text-xs text-gray-400 font-light">{formatTimeAgo(notification.createdAt)}</span>
+													</div>
+												</div>
+											</div>
+										);
+									})}
+								</div>
+							)}
+							
+							{/* This Week Section */}
+							{notificationTab === 'all' && groupedNotifications.thisWeek && groupedNotifications.thisWeek.length > 0 && (
+								<div className="px-8 py-6 border-t border-gray-100">
+									<p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-4">Cette semaine</p>
+									{groupedNotifications.thisWeek.map((notification: any) => {
+										const Icon = getNotificationIcon(notification.type);
+										return (
+											<div
+												key={notification.id}
+												onClick={() => handleNotificationClick(notification)}
+												className={`group relative bg-white border border-gray-100 rounded-lg p-4 mb-2 hover:border-gray-200 hover:shadow-sm transition-all cursor-pointer ${notification.isRead ? 'opacity-60 hover:opacity-100' : ''}`}
+											>
+												{!notification.isRead && (
+													<div className="absolute top-4 right-4 w-1.5 h-1.5 bg-[#002366] rounded-full"></div>
+												)}
+												<div className={`flex gap-4 ${!notification.isRead ? 'pr-4' : ''}`}>
+													<div className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center flex-shrink-0">
+														<Icon size={16} className="text-gray-600" />
+													</div>
+													<div className="flex-1 min-w-0">
+														<p className="text-sm font-medium text-gray-900 mb-1">{notification.title}</p>
+														<p className="text-xs text-gray-500 leading-relaxed mb-2">{notification.message}</p>
+														<span className="text-xs text-gray-400 font-light">{formatTimeAgo(notification.createdAt)}</span>
+													</div>
+												</div>
+											</div>
+										);
+									})}
+								</div>
+							)}
+							
+							{/* Older Section */}
+							{notificationTab === 'all' && groupedNotifications.older && groupedNotifications.older.length > 0 && (
+								<div className="px-8 py-6 border-t border-gray-100">
+									<p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-4">Plus ancien</p>
+									{groupedNotifications.older.map((notification: any) => {
+										const Icon = getNotificationIcon(notification.type);
+										return (
+											<div
+												key={notification.id}
+												onClick={() => handleNotificationClick(notification)}
+												className={`group relative bg-white border border-gray-100 rounded-lg p-4 mb-2 hover:border-gray-200 hover:shadow-sm transition-all cursor-pointer ${notification.isRead ? 'opacity-60 hover:opacity-100' : ''}`}
+											>
+												{!notification.isRead && (
+													<div className="absolute top-4 right-4 w-1.5 h-1.5 bg-[#002366] rounded-full"></div>
+												)}
+												<div className={`flex gap-4 ${!notification.isRead ? 'pr-4' : ''}`}>
+													<div className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center flex-shrink-0">
+														<Icon size={16} className="text-gray-600" />
+													</div>
+													<div className="flex-1 min-w-0">
+														<p className="text-sm font-medium text-gray-900 mb-1">{notification.title}</p>
+														<p className="text-xs text-gray-500 leading-relaxed mb-2">{notification.message}</p>
+														<span className="text-xs text-gray-400 font-light">{formatTimeAgo(notification.createdAt)}</span>
+													</div>
+												</div>
+											</div>
+										);
+									})}
+								</div>
+							)}
+						</>
+					)}
+				</div>
+
+				{/* Footer Actions */}
+				<div className="border-t border-gray-100 p-6">
+					<button 
+						onClick={handleMarkAllAsRead}
+						disabled={unreadCount === 0}
+						className="w-full py-2.5 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+					>
+						Marquer tout comme lu
+					</button>
+				</div>
+			</div>
+		</>
+	)}
+
+			{/* Main Content Wrapper to prevent overlap */}
+			<div className="ml-66">
+			</div>
+		</>
+	);
+}

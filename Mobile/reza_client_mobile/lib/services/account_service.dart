@@ -1,0 +1,116 @@
+import '../models/family_member.dart';
+import 'api_client.dart';
+
+class AccountService {
+  Future<List<FamilyMember>> getFamilyMembers(String email) async {
+    final res = await apiClient.get(
+      '/public/client/${Uri.encodeComponent(email)}/family-members',
+    );
+    final list = List<Map<String, dynamic>>.from((res['familyMembers'] as List?) ?? []);
+    return list.map(FamilyMember.fromJson).toList();
+  }
+
+  Future<FamilyMember> createFamilyMember({
+    required String clientEmail,
+    required String firstName,
+    String lastName = '',
+    required String relationship,
+    String? phone,
+    String? email,
+  }) async {
+    final res = await apiClient.post('/public/family-members', {
+      'clientEmail': clientEmail,
+      'firstName': firstName,
+      'lastName': lastName,
+      'relationship': relationship,
+      if (phone != null && phone.isNotEmpty) 'phone': phone,
+      if (email != null && email.isNotEmpty) 'email': email,
+    });
+    return FamilyMember.fromJson(Map<String, dynamic>.from(res['familyMember'] as Map));
+  }
+
+  Future<FamilyMember> updateFamilyMember({
+    required String id,
+    required String clientEmail,
+    required String firstName,
+    String lastName = '',
+    required String relationship,
+    String? phone,
+    String? email,
+  }) async {
+    final res = await apiClient.put('/public/family-members/$id', {
+      'clientEmail': clientEmail,
+      'firstName': firstName,
+      'lastName': lastName,
+      'relationship': relationship,
+      if (phone != null) 'phone': phone,
+      if (email != null) 'email': email,
+    });
+    return FamilyMember.fromJson(Map<String, dynamic>.from(res['familyMember'] as Map));
+  }
+
+  Future<void> deleteFamilyMember(String id, String clientEmail) async {
+    await apiClient.delete(
+      '/public/family-members/$id',
+      query: {'clientEmail': clientEmail},
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getAppointments(String email) async {
+    final res = await apiClient.get(
+      '/public/client/${Uri.encodeComponent(email)}/appointments',
+      query: {'limit': '100'},
+    );
+    return List<Map<String, dynamic>>.from((res['appointments'] as List?) ?? []);
+  }
+
+  Future<void> cancelAppointment(String appointmentId, String email) async {
+    await apiClient.put('/public/appointments/$appointmentId/cancel', {
+      'email': email,
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> getFavorites(String email) async {
+    final res = await apiClient.get(
+      '/public/client/${Uri.encodeComponent(email)}/favorites',
+    );
+    return List<Map<String, dynamic>>.from((res['favorites'] as List?) ?? []);
+  }
+
+  Future<Map<String, dynamic>> addFavorite(String email, String tenantId) async {
+    return apiClient.post('/public/favorites', {
+      'clientEmail': email,
+      'tenantId': tenantId,
+    });
+  }
+
+  Future<void> removeFavorite(String favoriteId, String email) async {
+    await apiClient.delete(
+      '/public/favorites/$favoriteId',
+      query: {'clientEmail': email},
+    );
+  }
+
+  Future<Map<String, dynamic>> updateProfile(
+    String email,
+    Map<String, dynamic> data,
+  ) async {
+    return apiClient.put('/public/client/${Uri.encodeComponent(email)}', data);
+  }
+
+  Future<void> changePassword({
+    required String email,
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    await apiClient.put(
+      '/public/client/${Uri.encodeComponent(email)}/change-password',
+      {
+        'currentPassword': currentPassword,
+        'newPassword': newPassword,
+      },
+    );
+  }
+}
+
+final accountService = AccountService();

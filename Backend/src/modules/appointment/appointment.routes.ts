@@ -1,0 +1,12 @@
+import express from 'express';
+import { appointmentController } from './appointment.controller';
+
+const router = express.Router();
+
+router.get('/', appointmentController.getAppointments);
+router.get('/:id', appointmentController.getAppointmentById);
+router.post('/', appointmentController.createAppointment);
+router.put('/:id', appointmentController.updateAppointment);
+router.delete('/:id', appointmentController.deleteAppointment);
+
+export default router;
