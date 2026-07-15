@@ -74,6 +74,11 @@ app.use(cors({
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
+    // In development, allow all origins
+    if (process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
+    }
+
     // In production, reject unknown origins when CORS is configured
     if (process.env.NODE_ENV === 'production' && corsOrigins.length === 0) {
       console.warn('🚫 CORS blocked origin (no FRONTEND_URL configured):', origin);
