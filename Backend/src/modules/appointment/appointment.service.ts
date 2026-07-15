@@ -2,6 +2,7 @@ import { prisma } from '../../lib/prisma';
 import { validateAppointmentRules } from '../../utils/schedulingValidation';
 import { resolveEmployeeUserId } from '../../utils/resolveEmployeeUserId';
 import { formatDateForNotification } from '../../utils/dateTime';
+import { tenantIdFilter } from '../../utils/salonScope';
 
 const ACTIVE_APPOINTMENT_STATUSES = new Set(['PENDING', 'CONFIRMED', 'IN_PROGRESS']);
 
@@ -16,10 +17,10 @@ function throwValidationError(details: {
 }
 
 export class AppointmentService {
-  async getAppointments(tenantId: string, filters: any, page: number = 1, limit: number = 50) {
+  async getAppointments(tenantIds: string | string[], filters: any, page: number = 1, limit: number = 50) {
     const skip = (page - 1) * limit;
     const take = limit;
-    const where: any = { tenantId };
+    const where: any = { tenantId: tenantIdFilter(tenantIds) };
 
     if (filters.startDate || filters.endDate) {
       where.startTime = {};
@@ -48,7 +49,16 @@ export class AppointmentService {
         orderBy: { startTime: 'asc' },
         include: {
           client: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
-          service: { select: { id: true, name: true, color: true, duration: true } },
+          service: {
+            select: {
+              id: true,
+              name: true,
+              color: true,
+              duration: true,
+              price: true,
+              priceFrom: true
+            }
+          },
           employee: { select: { id: true, firstName: true, lastName: true } },
           createdBy: { select: { id: true, firstName: true, lastName: true } }
         }
@@ -59,9 +69,9 @@ export class AppointmentService {
     return { appointments, total, page, limit, totalPages: Math.ceil(total / take) };
   }
 
-  async getAppointmentById(tenantId: string, id: string) {
+  async getAppointmentById(tenantIds: string | string[], id: string) {
     return prisma.appointment.findFirst({
-      where: { id, tenantId },
+      where: { id, tenantId: tenantIdFilter(tenantIds) },
       include: {
         client: true,
         service: true,
@@ -122,9 +132,12 @@ export class AppointmentService {
     });
   }
 
-  async updateAppointment(tenantId: string, id: string, data: any) {
-    const existing = await prisma.appointment.findFirst({ where: { id, tenantId } });
+  async updateAppointment(tenantIds: string | string[], id: string, data: any) {
+    const existing = await prisma.appointment.findFirst({
+      where: { id, tenantId: tenantIdFilter(tenantIds) },
+    });
     if (!existing) throw new Error('APPOINTMENT_NOT_FOUND');
+    const tenantId = existing.tenantId;
 
     const updateData: any = { ...data };
 
@@ -157,8 +170,18 @@ export class AppointmentService {
       data.employeeId !== undefined && resolvedEmployeeId !== existing.employeeId;
     const serviceChanged =
       data.serviceId !== undefined && data.serviceId !== existing.serviceId;
+    const timeChanged =
+      (data.startTime !== undefined &&
+        new Date(data.startTime).getTime() !== existing.startTime.getTime()) ||
+      (data.duration !== undefined && data.duration !== existing.duration);
+    // Status-only updates must not re-run create/reschedule rules (business hours, overlap).
+    const scheduleChanged = timeChanged || employeeChanged || serviceChanged;
 
-    if (employeeUserId && ACTIVE_APPOINTMENT_STATUSES.has(nextStatus)) {
+    if (
+      scheduleChanged &&
+      employeeUserId &&
+      ACTIVE_APPOINTMENT_STATUSES.has(nextStatus)
+    ) {
       const validationResult = await validateAppointmentRules({
         tenantId,
         employeeId: employeeUserId,
@@ -217,8 +240,10 @@ export class AppointmentService {
     return appointment;
   }
 
-  async deleteAppointment(tenantId: string, id: string, userId: string) {
-    const appointment = await prisma.appointment.findFirst({ where: { id, tenantId } });
+  async deleteAppointment(tenantIds: string | string[], id: string, userId: string) {
+    const appointment = await prisma.appointment.findFirst({
+      where: { id, tenantId: tenantIdFilter(tenantIds) },
+    });
     if (!appointment) throw new Error('APPOINTMENT_NOT_FOUND');
 
     if (appointment.status === 'CANCELLED') {

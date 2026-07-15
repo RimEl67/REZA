@@ -2,6 +2,7 @@ import { prisma } from '../../lib/prisma';
 import { hashPassword, comparePassword } from '../../utils/password';
 import { generateToken } from '../../utils/jwt';
 import { LoginInput, RegisterInput } from './auth.schema';
+import { accountService } from '../account/account.service';
 
 export class AuthService {
   async login(input: LoginInput) {
@@ -38,11 +39,19 @@ export class AuthService {
       };
     }
 
-    if (!user.tenant.isActive) {
+    // Global SUPER_ADMIN has no tenant; regular users require an active tenant
+    if (user.tenant && !user.tenant.isActive) {
       throw {
         status: 403,
         error: 'Tenant inactive',
         message: 'Your organization account has been deactivated'
+      };
+    }
+    if (!user.tenant && user.role !== 'SUPER_ADMIN') {
+      throw {
+        status: 403,
+        error: 'Invalid account',
+        message: 'Your account is not linked to an organization'
       };
     }
 
@@ -58,9 +67,12 @@ export class AuthService {
     const token = generateToken({
       userId: user.id,
       email: user.email,
-      tenantId: user.tenantId,
+      ...(user.tenantId ? { tenantId: user.tenantId } : {}),
       role: user.role
     });
+
+    // Multi-salon account context (owner admins)
+    const accountContext = await accountService.getContextForUser(user.id);
 
     return {
       token,
@@ -71,11 +83,18 @@ export class AuthService {
         lastName: user.lastName,
         role: user.role,
         tenantId: user.tenantId,
-        tenant: {
-          id: user.tenant.id,
-          name: user.tenant.name
-        }
-      }
+        tenant: user.tenant
+          ? {
+              id: user.tenant.id,
+              name: user.tenant.name
+            }
+          : null
+      },
+      account: accountContext.account,
+      salons: accountContext.salons,
+      activeTenantId: user.tenantId,
+      subscription: accountContext.subscription,
+      salonLimit: accountContext.salonLimit
     };
   }
 
@@ -98,7 +117,9 @@ export class AuthService {
           city: input.tenantCity || null,
           category: input.tenantCategory || null,
           tags,
-          isActive: true
+          isActive: true,
+          // New salons stay hidden from clients until the account subscribes
+          subscriptionActive: false
         }
       });
 
@@ -198,10 +219,19 @@ export class AuthService {
       }
     });
 
+    // Multi-salon: tenant creators own an Account that groups their salons
+    if (input.createTenant) {
+      const account = await accountService.ensureAccountForOwner(user.id);
+      await prisma.tenant.update({
+        where: { id: tenantId },
+        data: { accountId: account.id }
+      });
+    }
+
     const token = generateToken({
       userId: user.id,
       email: user.email,
-      tenantId: user.tenantId,
+      tenantId: tenantId,
       role: user.role
     });
 
@@ -214,15 +244,68 @@ export class AuthService {
         lastName: user.lastName,
         role: user.role,
         tenantId: user.tenantId,
-        tenant: {
-          id: user.tenant.id,
-          name: user.tenant.name
-        }
+        tenant: user.tenant
+          ? {
+              id: user.tenant.id,
+              name: user.tenant.name
+            }
+          : null
       }
     };
   }
 
-  async getCurrentUser(userId: string) {
+  /**
+   * Multi-salon: re-issue a tenant-scoped token for another salon of the
+   * owner's account.
+   */
+  async switchSalon(userId: string, targetTenantId: string) {
+    const { salonService } = await import('../salon/salon.service');
+    const { tenant } = await salonService.validateSwitchTarget(userId, targetTenantId);
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        tenantId: true
+      }
+    });
+    if (!user) {
+      throw { status: 401, error: 'User not found', message: 'User no longer exists' };
+    }
+
+    const token = generateToken({
+      userId: user.id,
+      email: user.email,
+      tenantId: tenant.id,
+      role: user.role
+    });
+
+    const accountContext = await accountService.getContextForUser(user.id);
+
+    return {
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+        tenantId: tenant.id,
+        tenant: { id: tenant.id, name: tenant.name }
+      },
+      account: accountContext.account,
+      salons: accountContext.salons,
+      activeTenantId: tenant.id,
+      subscription: accountContext.subscription,
+      salonLimit: accountContext.salonLimit
+    };
+  }
+
+  async getCurrentUser(userId: string, activeTenantId?: string) {
     console.log('[Auth Service /me] Fetching user:', userId);
 
     const user = await prisma.user.findUnique({
@@ -246,24 +329,29 @@ export class AuthService {
       };
     }
 
+    // The token's tenant wins (multi-salon switch); fall back to home tenant
+    const effectiveTenantId = activeTenantId || user.tenantId;
+
     let tenant = null;
-    try {
-      tenant = await prisma.tenant.findUnique({
-        where: { id: user.tenantId },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          phone: true,
-          address: true,
-          logo: true
-        }
-      });
-    } catch (tenantError: any) {
-      console.error('[Auth Service /me] Error fetching tenant:', tenantError);
+    if (effectiveTenantId) {
+      try {
+        tenant = await prisma.tenant.findUnique({
+          where: { id: effectiveTenantId },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
+            address: true,
+            logo: true
+          }
+        });
+      } catch (tenantError: any) {
+        console.error('[Auth Service /me] Error fetching tenant:', tenantError);
+      }
     }
 
-    if (!tenant) {
+    if (!tenant && user.role !== 'SUPER_ADMIN') {
       console.error('[Auth Service /me] User tenant not found for tenantId:', user.tenantId);
       throw {
         status: 500,
@@ -272,6 +360,9 @@ export class AuthService {
       };
     }
 
+    // Multi-salon account context (owner admins)
+    const accountContext = await accountService.getContextForUser(user.id);
+
     return {
       user: {
         id: user.id,
@@ -279,9 +370,14 @@ export class AuthService {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
-        tenantId: user.tenantId,
+        tenantId: effectiveTenantId,
         tenant
-      }
+      },
+      account: accountContext.account,
+      salons: accountContext.salons,
+      activeTenantId: effectiveTenantId,
+      subscription: accountContext.subscription,
+      salonLimit: accountContext.salonLimit
     };
   }
 
@@ -350,7 +446,7 @@ export class AuthService {
     const token = generateToken({
       userId: user.id,
       email: user.email,
-      tenantId: user.tenantId,
+      ...(user.tenantId ? { tenantId: user.tenantId } : {}),
       role: user.role
     });
 
@@ -364,10 +460,12 @@ export class AuthService {
         lastName: user.lastName,
         role: user.role,
         tenantId: user.tenantId,
-        tenant: {
-          id: user.tenant.id,
-          name: user.tenant.name
-        }
+        tenant: user.tenant
+          ? {
+              id: user.tenant.id,
+              name: user.tenant.name
+            }
+          : null
       }
     };
   }

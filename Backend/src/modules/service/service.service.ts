@@ -1,8 +1,9 @@
 import { prisma } from '../../lib/prisma';
+import { tenantIdFilter } from '../../utils/salonScope';
 
 export class ServiceService {
-  async getServices(tenantId: string, category?: string, search?: string) {
-    const where: any = { tenantId };
+  async getServices(tenantIds: string | string[], category?: string, search?: string) {
+    const where: any = { tenantId: tenantIdFilter(tenantIds) };
     
     if (category && category !== 'all') {
       where.category = category;
@@ -42,7 +43,7 @@ export class ServiceService {
     });
 
     const categories = await prisma.service.findMany({
-      where: { tenantId },
+      where: { tenantId: tenantIdFilter(tenantIds) },
       select: { category: true },
       distinct: ['category']
     });

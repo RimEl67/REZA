@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { serviceService } from './service.service';
 import { createServiceSchema, updateServiceSchema } from './service.schema';
+import { isSalonRequiredError, resolveWriteTenantId } from '../../utils/salonScope';
 
 export class ServiceController {
   async getServices(req: Request, res: Response, next: NextFunction) {
@@ -14,7 +15,11 @@ export class ServiceController {
       }
 
       const { category, search } = req.query;
-      const result = await serviceService.getServices(req.tenantId, category as string, search as string);
+      const result = await serviceService.getServices(
+        req.salonIds || [req.tenantId],
+        category as string,
+        search as string
+      );
       res.json(result);
     } catch (error) {
       next(error);
@@ -36,9 +41,13 @@ export class ServiceController {
   async createService(req: Request, res: Response, next: NextFunction) {
     try {
       const data = createServiceSchema.parse(req.body);
-      const service = await serviceService.createService(req.tenantId!, data);
+      const tenantId = resolveWriteTenantId(req, (req.body as any).tenantId);
+      const service = await serviceService.createService(tenantId, data);
       res.status(201).json({ service });
-    } catch (error) {
+    } catch (error: any) {
+      if (isSalonRequiredError(error)) {
+        return res.status(400).json({ error: 'Salon required', message: error.message });
+      }
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: 'Validation error', message: error.errors[0].message });
       }

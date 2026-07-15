@@ -141,9 +141,10 @@ export class DiscoveryService {
         website: tenant.website,
         city: tenant.city,
         googleMapsLink: tenant.googleMapsLink,
-        coordinates: tenant.latitude && tenant.longitude 
-          ? { lat: tenant.latitude, lng: tenant.longitude }
-          : null,
+        coordinates:
+          tenant.latitude != null && tenant.longitude != null
+            ? { lat: tenant.latitude, lng: tenant.longitude }
+            : null,
         tags: tenant.tags || [],
         price: priceDisplay,
         priceRange: minPrice !== null && maxPrice !== null ? { min: minPrice, max: maxPrice, avg: avgPrice } : null,
@@ -317,9 +318,10 @@ export class DiscoveryService {
           price: priceDisplay,
           priceRange: minPrice !== null && maxPrice !== null ? { min: minPrice, max: maxPrice, avg: avgPrice } : null,
           nextAvailable: nextAvailable,
-          coordinates: tenant.latitude && tenant.longitude 
-            ? { lat: tenant.latitude, lng: tenant.longitude }
-            : null,
+          coordinates:
+            tenant.latitude != null && tenant.longitude != null
+              ? { lat: tenant.latitude, lng: tenant.longitude }
+              : null,
           distanceKm:
             userLat != null &&
             userLng != null &&

@@ -35,6 +35,12 @@ router.get('/google/url', (req, res, next) => authController.getGoogleUrl(req, r
 router.get('/google/callback', (req, res, next) => authController.handleGoogleCallback(req, res, next));
 
 /**
+ * POST /api/auth/switch-salon
+ * Multi-salon: re-issue a token scoped to another salon of the owner's account
+ */
+router.post('/switch-salon', authMiddleware, (req, res, next) => authController.switchSalon(req, res, next));
+
+/**
  * POST /api/auth/logout
  * Logout
  */

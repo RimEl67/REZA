@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { appointmentService } from './appointment.service';
 import { createAppointmentSchema, updateAppointmentSchema } from './appointment.schema';
+import { isSalonRequiredError, resolveWriteTenantId } from '../../utils/salonScope';
 
 export class AppointmentController {
   async getAppointments(req: Request, res: Response, next: NextFunction) {
@@ -18,7 +19,7 @@ export class AppointmentController {
       };
 
       const result = await appointmentService.getAppointments(
-        req.tenantId!, 
+        req.salonIds || [req.tenantId!],
         filters, 
         parseInt(page as string), 
         parseInt(limit as string)
@@ -40,7 +41,10 @@ export class AppointmentController {
 
   async getAppointmentById(req: Request, res: Response, next: NextFunction) {
     try {
-      const appointment = await appointmentService.getAppointmentById(req.tenantId!, req.params.id);
+      const appointment = await appointmentService.getAppointmentById(
+        req.salonIds || [req.tenantId!],
+        req.params.id
+      );
       if (!appointment) {
         return res.status(404).json({ error: 'Appointment not found' });
       }
@@ -53,9 +57,13 @@ export class AppointmentController {
   async createAppointment(req: Request, res: Response, next: NextFunction) {
     try {
       const data = createAppointmentSchema.parse(req.body);
-      const appointment = await appointmentService.createAppointment(req.tenantId!, req.userId!, data, false);
+      const tenantId = resolveWriteTenantId(req, (req.body as any).tenantId);
+      const appointment = await appointmentService.createAppointment(tenantId, req.userId!, data, false);
       res.status(201).json({ appointment });
     } catch (error: any) {
+      if (isSalonRequiredError(error)) {
+        return res.status(400).json({ error: 'Salon required', message: error.message });
+      }
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: 'Validation error', message: error.errors[0].message });
       }
@@ -76,7 +84,11 @@ export class AppointmentController {
   async updateAppointment(req: Request, res: Response, next: NextFunction) {
     try {
       const data = updateAppointmentSchema.parse(req.body);
-      const appointment = await appointmentService.updateAppointment(req.tenantId!, req.params.id, data);
+      const appointment = await appointmentService.updateAppointment(
+        req.salonIds || [req.tenantId!],
+        req.params.id,
+        data
+      );
       res.json({ appointment });
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -95,7 +107,11 @@ export class AppointmentController {
 
   async deleteAppointment(req: Request, res: Response, next: NextFunction) {
     try {
-      await appointmentService.deleteAppointment(req.tenantId!, req.params.id, req.userId!);
+      await appointmentService.deleteAppointment(
+        req.salonIds || [req.tenantId!],
+        req.params.id,
+        req.userId!
+      );
       res.json({ message: 'Appointment cancelled successfully' });
     } catch (error: any) {
       if (error.message === 'APPOINTMENT_NOT_FOUND') return res.status(404).json({ error: 'Appointment not found' });

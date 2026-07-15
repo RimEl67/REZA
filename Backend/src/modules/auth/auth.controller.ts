@@ -61,7 +61,7 @@ export class AuthController {
         });
       }
 
-      const result = await authService.getCurrentUser(req.userId);
+      const result = await authService.getCurrentUser(req.userId, req.tenantId);
       res.json(result);
     } catch (error: any) {
       if (error.status) {
@@ -221,6 +221,26 @@ export class AuthController {
     } catch (error: any) {
       console.error('[Auth Controller Google] Unexpected error:', error);
       res.redirect(`${authService.getSaasUrl()}/login?error=google_auth_failed&details=unexpected_error`);
+    }
+  }
+
+  async switchSalon(req: Request, res: Response, next: NextFunction) {
+    try {
+      const schema = z.object({ tenantId: z.string().min(1) });
+      const { tenantId } = schema.parse(req.body);
+      const result = await authService.switchSalon(req.userId!, tenantId);
+      res.json(result);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Validation error',
+          message: error.errors[0].message
+        });
+      }
+      if (error.status) {
+        return res.status(error.status).json({ error: error.error, message: error.message });
+      }
+      next(error);
     }
   }
 

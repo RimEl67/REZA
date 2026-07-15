@@ -1,9 +1,49 @@
 import { prisma } from '../../lib/prisma';
 import crypto from 'crypto';
+import { tenantIdFilter } from '../../utils/salonScope';
+import { CreateSaleInput } from './invoice.schema';
+
+const invoiceListInclude = {
+  client: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      phone: true
+    }
+  },
+  appointment: {
+    select: {
+      id: true,
+      startTime: true,
+      service: {
+        select: {
+          name: true
+        }
+      },
+      employee: {
+        select: {
+          firstName: true,
+          lastName: true
+        }
+      }
+    }
+  },
+  items: {
+    select: {
+      id: true,
+      serviceId: true,
+      serviceName: true,
+      price: true,
+      quantity: true
+    }
+  }
+} as const;
 
 export class InvoiceService {
-  async getInvoices(tenantId: string, status?: string) {
-    const where: any = { tenantId };
+  async getInvoices(tenantIds: string | string[], status?: string) {
+    const where: any = { tenantId: tenantIdFilter(tenantIds) };
     if (status && status !== 'ALL') {
       where.status = status;
     }
@@ -11,36 +51,35 @@ export class InvoiceService {
     return prisma.invoice.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      include: {
-        client: {
-          select: {
-            firstName: true,
-            lastName: true,
-            email: true
-          }
-        },
-        appointment: {
-          select: {
-            startTime: true,
-            service: {
-              select: {
-                name: true
-              }
-            }
-          }
-        }
-      }
+      include: invoiceListInclude
     });
   }
 
-  async getInvoiceById(tenantId: string, id: string) {
+  async getInvoiceById(tenantIds: string | string[], id: string) {
     return prisma.invoice.findFirst({
-      where: { id, tenantId },
+      where: { id, tenantId: tenantIdFilter(tenantIds) },
       include: {
         client: true,
         appointment: {
           include: {
-            service: true
+            service: true,
+            employee: {
+              select: {
+                firstName: true,
+                lastName: true
+              }
+            }
+          }
+        },
+        items: {
+          include: {
+            service: {
+              select: {
+                id: true,
+                name: true,
+                price: true
+              }
+            }
           }
         },
         tenant: {
@@ -55,16 +94,20 @@ export class InvoiceService {
     });
   }
 
-  async createInvoice(tenantId: string, data: any) {
-    const client = await prisma.client.findFirst({
-      where: {
-        id: data.clientId,
-        tenantId
-      }
-    });
+  async createInvoice(tenantId: string, data: any, salonIds?: string[]) {
+    if (data.clientId) {
+      // Allow clients from any salon in request scope (multi-salon lists).
+      const scope = salonIds && salonIds.length > 0 ? salonIds : [tenantId];
+      const client = await prisma.client.findFirst({
+        where: {
+          id: data.clientId,
+          tenantId: tenantIdFilter(scope)
+        }
+      });
 
-    if (!client) {
-      throw new Error('CLIENT_NOT_FOUND');
+      if (!client) {
+        throw new Error('CLIENT_NOT_FOUND');
+      }
     }
 
     if (data.appointmentId) {
@@ -78,28 +121,24 @@ export class InvoiceService {
       if (!appointment) {
         throw new Error('APPOINTMENT_NOT_FOUND');
       }
-      
-      if (appointment.clientId !== data.clientId) {
+
+      if (data.clientId && appointment.clientId !== data.clientId) {
         throw new Error('CLIENT_MISMATCH');
       }
     }
 
-    const date = new Date();
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const randomStr = crypto.randomBytes(2).toString('hex').toUpperCase();
-    const invoiceNumber = `INV-${year}${month}-${randomStr}`;
-
-    const total = data.amount + (data.amount * (data.tax / 100));
+    const invoiceNumber = this.generateInvoiceNumber();
+    const tax = data.tax ?? 0;
+    const total = data.amount + data.amount * (tax / 100);
 
     return prisma.invoice.create({
       data: {
         tenantId,
-        clientId: data.clientId,
+        clientId: data.clientId || null,
         appointmentId: data.appointmentId,
         invoiceNumber,
         amount: data.amount,
-        tax: data.tax,
+        tax,
         total,
         status: 'PENDING',
         paymentMethod: data.paymentMethod,
@@ -107,14 +146,123 @@ export class InvoiceService {
       },
       include: {
         client: true,
-        appointment: true
+        appointment: true,
+        items: true
       }
     });
   }
 
-  async updateInvoice(tenantId: string, id: string, data: any) {
+  /**
+   * Encaisser une vente: PAID invoice + Catalog service line items.
+   */
+  async createSale(tenantId: string, data: CreateSaleInput, _salonIds?: string[]) {
+    // Client must belong to the write salon (no walk-in / cross-salon).
+    const client = await prisma.client.findUnique({
+      where: { id: data.clientId },
+      select: { id: true, tenantId: true }
+    });
+    if (!client) {
+      throw new Error('CLIENT_NOT_FOUND');
+    }
+    if (client.tenantId !== tenantId) {
+      throw new Error('CLIENT_WRONG_SALON');
+    }
+
+    if (data.appointmentId) {
+      const appointment = await prisma.appointment.findFirst({
+        where: { id: data.appointmentId, tenantId }
+      });
+      if (!appointment) {
+        throw new Error('APPOINTMENT_NOT_FOUND');
+      }
+      if (appointment.clientId !== data.clientId) {
+        throw new Error('CLIENT_MISMATCH');
+      }
+      const existingInvoice = await prisma.invoice.findFirst({
+        where: { appointmentId: data.appointmentId }
+      });
+      if (existingInvoice) {
+        throw new Error('APPOINTMENT_ALREADY_INVOICED');
+      }
+    }
+
+    const serviceIds = data.items.map((i) => i.serviceId);
+    const services = await prisma.service.findMany({
+      where: {
+        id: { in: serviceIds },
+        tenantId
+      }
+    });
+
+    if (services.length !== new Set(serviceIds).size) {
+      throw new Error('SERVICE_NOT_FOUND');
+    }
+
+    const serviceById = new Map(services.map((s) => [s.id, s]));
+
+    const resolvedItems = data.items.map((item) => {
+      const service = serviceById.get(item.serviceId)!;
+      const unitPrice =
+        item.price ??
+        service.price ??
+        service.priceFrom ??
+        0;
+      if (unitPrice <= 0) {
+        throw new Error('SERVICE_PRICE_REQUIRED');
+      }
+      const quantity = item.quantity ?? 1;
+      return {
+        serviceId: service.id,
+        serviceName: service.name,
+        price: unitPrice,
+        quantity
+      };
+    });
+
+    const itemsSum = resolvedItems.reduce(
+      (sum, item) => sum + item.price * item.quantity,
+      0
+    );
+    const amount = data.amount ?? itemsSum;
+    if (amount <= 0) {
+      throw new Error('INVALID_AMOUNT');
+    }
+
+    const tax = data.tax ?? 0;
+    const total = amount + amount * (tax / 100);
+    const notes =
+      data.notes?.trim() ||
+      resolvedItems.map((i) => (i.quantity > 1 ? `${i.serviceName} x${i.quantity}` : i.serviceName)).join(', ');
+
+    return prisma.invoice.create({
+      data: {
+        tenantId,
+        clientId: data.clientId,
+        appointmentId: data.appointmentId || null,
+        invoiceNumber: this.generateInvoiceNumber(),
+        amount,
+        tax,
+        total,
+        status: 'PAID',
+        paymentMethod: data.paymentMethod,
+        paidAt: new Date(),
+        notes,
+        items: {
+          create: resolvedItems.map((item) => ({
+            serviceId: item.serviceId,
+            serviceName: item.serviceName,
+            price: item.price,
+            quantity: item.quantity
+          }))
+        }
+      },
+      include: invoiceListInclude
+    });
+  }
+
+  async updateInvoice(tenantIds: string | string[], id: string, data: any) {
     const invoice = await prisma.invoice.findFirst({
-      where: { id, tenantId }
+      where: { id, tenantId: tenantIdFilter(tenantIds) }
     });
 
     if (!invoice) {
@@ -133,47 +281,50 @@ export class InvoiceService {
       data: updateData,
       include: {
         client: true,
-        appointment: true
+        appointment: true,
+        items: true
       }
     });
   }
 
-  async getStats(tenantId: string) {
+  async getStats(tenantIds: string | string[]) {
+    const filter = tenantIdFilter(tenantIds);
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    
-    const [totalRevenueResult, monthlyRevenueResult, invoicesCount, pendingInvoicesCount] = await Promise.all([
-      prisma.invoice.aggregate({
-        where: {
-          tenantId,
-          status: 'PAID'
-        },
-        _sum: {
-          total: true
-        }
-      }),
-      prisma.invoice.aggregate({
-        where: {
-          tenantId,
-          status: 'PAID',
-          createdAt: {
-            gte: startOfMonth
+
+    const [totalRevenueResult, monthlyRevenueResult, invoicesCount, pendingInvoicesCount] =
+      await Promise.all([
+        prisma.invoice.aggregate({
+          where: {
+            tenantId: filter,
+            status: 'PAID'
+          },
+          _sum: {
+            total: true
           }
-        },
-        _sum: {
-          total: true
-        }
-      }),
-      prisma.invoice.count({
-        where: { tenantId }
-      }),
-      prisma.invoice.count({
-        where: {
-          tenantId,
-          status: 'PENDING'
-        }
-      })
-    ]);
+        }),
+        prisma.invoice.aggregate({
+          where: {
+            tenantId: filter,
+            status: 'PAID',
+            createdAt: {
+              gte: startOfMonth
+            }
+          },
+          _sum: {
+            total: true
+          }
+        }),
+        prisma.invoice.count({
+          where: { tenantId: filter }
+        }),
+        prisma.invoice.count({
+          where: {
+            tenantId: filter,
+            status: 'PENDING'
+          }
+        })
+      ]);
 
     return {
       totalRevenue: totalRevenueResult._sum.total || 0,
@@ -181,6 +332,14 @@ export class InvoiceService {
       invoicesCount,
       pendingInvoicesCount
     };
+  }
+
+  private generateInvoiceNumber() {
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const randomStr = crypto.randomBytes(2).toString('hex').toUpperCase();
+    return `INV-${year}${month}-${randomStr}`;
   }
 }
 

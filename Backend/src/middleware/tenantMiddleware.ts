@@ -1,11 +1,15 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../lib/prisma';
 import { requireTenantId } from '../utils/tenantIsolation';
+import { accountService } from '../modules/account/account.service';
+import { parseSalonIdsInput } from '../utils/salonScope';
 
 declare global {
   namespace Express {
     interface Request {
       tenantId?: string;
+      /** Validated salon (tenant) IDs in read scope. Owners: 1..N; staff: single home tenant. */
+      salonIds?: string[];
       userId?: string;
       user?: {
         id: string;
@@ -19,6 +23,7 @@ declare global {
 
 /**
  * Validates tenant from authMiddleware (req.tenantId).
+ * Resolves req.salonIds from X-Salon-Ids / salonIds (owners only; staff stay single-tenant).
  * x-tenant-id header is only accepted in non-production when ALLOW_TENANT_HEADER=true.
  */
 export const tenantMiddleware = async (req: Request, res: Response, next: NextFunction) => {
@@ -67,6 +72,34 @@ export const tenantMiddleware = async (req: Request, res: Response, next: NextFu
         error: 'Tenant validation failed',
         message: isolationError.message || 'Invalid tenant ID',
       });
+    }
+
+    // Multi-salon scope for account owners; staff always single home tenant
+    const userId = req.userId || req.user?.id;
+    if (userId) {
+      const ctx = await accountService.getContextForUser(userId);
+      const ownedIds = ctx.salons.map((s) => s.id);
+
+      if (ownedIds.length > 0) {
+        const requested = parseSalonIdsInput(req);
+        if (requested === 'all') {
+          req.salonIds = ownedIds;
+        } else {
+          const invalid = requested.filter((id) => !ownedIds.includes(id));
+          if (invalid.length > 0) {
+            return res.status(403).json({
+              error: 'Forbidden salons',
+              message: 'One or more salon ids are not part of your account.',
+            });
+          }
+          req.salonIds = requested.length > 0 ? requested : ownedIds;
+        }
+      } else {
+        // Staff / non-owner: ignore multi header, single tenant only
+        req.salonIds = [tenantId];
+      }
+    } else {
+      req.salonIds = [tenantId];
     }
 
     next();

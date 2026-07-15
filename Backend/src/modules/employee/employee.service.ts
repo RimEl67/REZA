@@ -1,8 +1,9 @@
 import { prisma } from '../../lib/prisma';
+import { tenantIdFilter } from '../../utils/salonScope';
 
 export class EmployeeService {
-  async getEmployees(tenantId: string, active?: string, search?: string) {
-    const where: any = { tenantId };
+  async getEmployees(tenantIds: string | string[], active?: string, search?: string) {
+    const where: any = { tenantId: tenantIdFilter(tenantIds) };
 
     if (active !== undefined) {
       where.isActive = active === 'true';

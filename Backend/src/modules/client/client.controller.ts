@@ -2,13 +2,14 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { clientService } from './client.service';
 import { createClientSchema, updateClientSchema } from './client.schema';
+import { isSalonRequiredError, resolveWriteTenantId } from '../../utils/salonScope';
 
 export class ClientController {
   async getClients(req: Request, res: Response, next: NextFunction) {
     try {
       const { search, status, page = '1', limit = '50' } = req.query;
       const result = await clientService.getClients(
-        req.tenantId!, 
+        req.salonIds || [req.tenantId!],
         search as string, 
         status as string, 
         parseInt(page as string), 
@@ -22,7 +23,7 @@ export class ClientController {
 
   async detectDuplicates(req: Request, res: Response, next: NextFunction) {
     try {
-      const duplicates = await clientService.detectDuplicates(req.tenantId!);
+      const duplicates = await clientService.detectDuplicates(req.salonIds || [req.tenantId!]);
       res.json({ duplicates });
     } catch (error) {
       next(error);
@@ -31,7 +32,10 @@ export class ClientController {
 
   async getClientById(req: Request, res: Response, next: NextFunction) {
     try {
-      const client = await clientService.getClientById(req.tenantId!, req.params.id);
+      const client = await clientService.getClientById(
+        req.salonIds || [req.tenantId!],
+        req.params.id
+      );
       if (!client) {
         return res.status(404).json({ error: 'Client not found' });
       }
@@ -44,9 +48,13 @@ export class ClientController {
   async createClient(req: Request, res: Response, next: NextFunction) {
     try {
       const data = createClientSchema.parse(req.body);
-      const client = await clientService.createClient(req.tenantId!, data);
+      const tenantId = resolveWriteTenantId(req, (req.body as any).tenantId);
+      const client = await clientService.createClient(tenantId, data);
       res.status(201).json({ client });
     } catch (error: any) {
+      if (isSalonRequiredError(error)) {
+        return res.status(400).json({ error: 'Salon required', message: error.message });
+      }
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: 'Validation error', message: error.errors[0].message });
       }
@@ -63,7 +71,11 @@ export class ClientController {
   async updateClient(req: Request, res: Response, next: NextFunction) {
     try {
       const data = updateClientSchema.parse(req.body);
-      const client = await clientService.updateClient(req.tenantId!, req.params.id, data);
+      const client = await clientService.updateClient(
+        req.salonIds || [req.tenantId!],
+        req.params.id,
+        data
+      );
       res.json({ client });
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -78,7 +90,7 @@ export class ClientController {
 
   async deleteClient(req: Request, res: Response, next: NextFunction) {
     try {
-      await clientService.deleteClient(req.tenantId!, req.params.id);
+      await clientService.deleteClient(req.salonIds || [req.tenantId!], req.params.id);
       res.json({ message: 'Client deleted successfully' });
     } catch (error: any) {
       if (error.message === 'CLIENT_NOT_FOUND') {
@@ -98,7 +110,11 @@ export class ClientController {
         });
       }
       
-      await clientService.mergeClients(req.tenantId!, primaryClientId, duplicateClientIds);
+      await clientService.mergeClients(
+        req.salonIds || [req.tenantId!],
+        primaryClientId,
+        duplicateClientIds
+      );
       res.json({ 
         message: 'Clients merged successfully',
         mergedClientId: primaryClientId

@@ -1,10 +1,11 @@
 import { prisma } from '../../lib/prisma';
+import { tenantIdFilter } from '../../utils/salonScope';
 
 export class ClientService {
-  async getClients(tenantId: string, search?: string, status?: string, page: number = 1, limit: number = 50) {
+  async getClients(tenantIds: string | string[], search?: string, status?: string, page: number = 1, limit: number = 50) {
     const skip = (page - 1) * limit;
     const take = limit;
-    const where: any = { tenantId };
+    const where: any = { tenantId: tenantIdFilter(tenantIds) };
 
     if (status && status !== 'all') {
       where.status = status;
@@ -47,9 +48,9 @@ export class ClientService {
     };
   }
 
-  async detectDuplicates(tenantId: string) {
+  async detectDuplicates(tenantIds: string | string[]) {
     const allClients = await prisma.client.findMany({
-      where: { tenantId },
+      where: { tenantId: tenantIdFilter(tenantIds) },
       orderBy: { createdAt: 'desc' }
     });
 
@@ -140,9 +141,9 @@ export class ClientService {
     return duplicateGroups;
   }
 
-  async getClientById(tenantId: string, id: string) {
+  async getClientById(tenantIds: string | string[], id: string) {
     return prisma.client.findFirst({
-      where: { id, tenantId },
+      where: { id, tenantId: tenantIdFilter(tenantIds) },
       include: {
         appointments: {
           take: 10,
@@ -182,9 +183,9 @@ export class ClientService {
     });
   }
 
-  async updateClient(tenantId: string, id: string, data: any) {
+  async updateClient(tenantIds: string | string[], id: string, data: any) {
     const existing = await prisma.client.findFirst({
-      where: { id, tenantId }
+      where: { id, tenantId: tenantIdFilter(tenantIds) }
     });
 
     if (!existing) {
@@ -192,7 +193,7 @@ export class ClientService {
     }
 
     return prisma.client.update({
-      where: { id, tenantId },
+      where: { id },
       data: {
         ...data,
         dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : undefined
@@ -200,9 +201,9 @@ export class ClientService {
     });
   }
 
-  async deleteClient(tenantId: string, id: string) {
+  async deleteClient(tenantIds: string | string[], id: string) {
     const client = await prisma.client.findFirst({
-      where: { id, tenantId }
+      where: { id, tenantId: tenantIdFilter(tenantIds) }
     });
 
     if (!client) {
@@ -210,18 +211,21 @@ export class ClientService {
     }
 
     await prisma.client.delete({
-      where: { id, tenantId }
+      where: { id }
     });
   }
 
-  async mergeClients(tenantId: string, primaryClientId: string, duplicateClientIds: string[]) {
+  async mergeClients(tenantIds: string | string[], primaryClientId: string, duplicateClientIds: string[]) {
+    const filter = tenantIdFilter(tenantIds);
     const primaryClient = await prisma.client.findFirst({
-      where: { id: primaryClientId, tenantId }
+      where: { id: primaryClientId, tenantId: filter }
     });
 
     if (!primaryClient) {
       throw new Error('PRIMARY_CLIENT_NOT_FOUND');
     }
+
+    const tenantId = primaryClient.tenantId;
 
     const duplicateClients = await prisma.client.findMany({
       where: { id: { in: duplicateClientIds }, tenantId }

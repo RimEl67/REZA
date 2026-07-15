@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { tenantService } from './tenant.service';
 import { createTenantSchema } from './tenant.schema';
+import { isSalonRequiredError, resolveWriteTenantId } from '../../utils/salonScope';
 
 export class TenantController {
   async getTenant(req: Request, res: Response, next: NextFunction) {
@@ -151,18 +152,29 @@ export class TenantController {
 
   async getBusinessHours(req: Request, res: Response, next: NextFunction) {
     try {
-      const result = await tenantService.getBusinessHours(req.tenantId!);
+      const tenantId = resolveWriteTenantId(req, (req.query as any).tenantId || (req.query as any).salonId);
+      const result = await tenantService.getBusinessHours(tenantId);
       res.json(result);
-    } catch (error) {
+    } catch (error: any) {
+      if (isSalonRequiredError(error)) {
+        return res.status(400).json({ error: 'Salon required', message: error.message });
+      }
       next(error);
     }
   }
 
   async updateBusinessHours(req: Request, res: Response, next: NextFunction) {
     try {
-      const result = await tenantService.updateBusinessHours(req.tenantId!, req.body);
+      const tenantId = resolveWriteTenantId(
+        req,
+        (req.body as any).tenantId || (req.body as any).salonId
+      );
+      const result = await tenantService.updateBusinessHours(tenantId, req.body);
       res.json(result);
-    } catch (error) {
+    } catch (error: any) {
+      if (isSalonRequiredError(error)) {
+        return res.status(400).json({ error: 'Salon required', message: error.message });
+      }
       next(error);
     }
   }

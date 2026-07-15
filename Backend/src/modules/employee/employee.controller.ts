@@ -2,12 +2,17 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { employeeService } from './employee.service';
 import { createEmployeeSchema, updateEmployeeSchema } from './employee.schema';
+import { isSalonRequiredError, resolveWriteTenantId } from '../../utils/salonScope';
 
 export class EmployeeController {
   async getEmployees(req: Request, res: Response, next: NextFunction) {
     try {
       const { active, search } = req.query;
-      const employees = await employeeService.getEmployees(req.tenantId!, active as string, search as string);
+      const employees = await employeeService.getEmployees(
+        req.salonIds || [req.tenantId!],
+        active as string,
+        search as string
+      );
       res.json({ employees });
     } catch (error) {
       next(error);
@@ -29,9 +34,13 @@ export class EmployeeController {
   async createEmployee(req: Request, res: Response, next: NextFunction) {
     try {
       const data = createEmployeeSchema.parse(req.body);
-      const employee = await employeeService.createEmployee(req.tenantId!, data);
+      const tenantId = resolveWriteTenantId(req, (req.body as any).tenantId);
+      const employee = await employeeService.createEmployee(tenantId, data);
       res.status(201).json({ employee });
-    } catch (error) {
+    } catch (error: any) {
+      if (isSalonRequiredError(error)) {
+        return res.status(400).json({ error: 'Salon required', message: error.message });
+      }
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: 'Validation error', message: error.errors[0].message });
       }

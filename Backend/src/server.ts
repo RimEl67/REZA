@@ -23,6 +23,10 @@ import notificationRoutes from './modules/notification/notification.routes';
 import availabilityRoutes from './modules/availability/availability.routes';
 import familyMemberRoutes from './modules/family-member/familyMember.routes';
 import dashboardRoutes from './modules/dashboard/dashboard.routes';
+import salonRoutes from './modules/salon/salon.routes';
+import subscriptionRoutes from './modules/subscription/subscription.routes';
+import stripeWebhookRoutes from './modules/subscription/stripe.webhook';
+import superAdminRoutes from './modules/superadmin/superadmin.routes';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
@@ -99,6 +103,11 @@ app.use(cors({
 
 // Use production logging format in production
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+
+// Stripe webhook needs the raw body for signature verification —
+// must be mounted BEFORE the JSON body parser
+app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }), stripeWebhookRoutes);
+
 // Increase body parser limit for photo uploads (50MB)
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -112,6 +121,12 @@ const publicUploadsPath = path.resolve(__dirname, '..', 'public', 'uploads');
 if (!fs.existsSync(publicUploadsPath)) {
   fs.mkdirSync(publicUploadsPath, { recursive: true });
   console.log(`📁 Created uploads directory: ${publicUploadsPath}`);
+}
+
+const salonUploadsPath = path.join(publicUploadsPath, 'salons');
+if (!fs.existsSync(salonUploadsPath)) {
+  fs.mkdirSync(salonUploadsPath, { recursive: true });
+  console.log(`📁 Created salon uploads directory: ${salonUploadsPath}`);
 }
 
 console.log(`📂 Serving static files from: ${publicUploadsPath}`);
@@ -155,6 +170,9 @@ app.use('/api/public', publicRoutes);
 app.use('/api/public/availability', availabilityRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/tenant', tenantRoutes);
+app.use('/api/salons', salonRoutes);
+app.use('/api/subscription', subscriptionRoutes);
+app.use('/api/superadmin', superAdminRoutes);
 app.use('/api/clients', ...staffMiddleware, clientRoutes);
 app.use('/api/services', ...staffMiddleware, serviceRoutes);
 app.use('/api/employees', ...staffMiddleware, employeeRoutes);

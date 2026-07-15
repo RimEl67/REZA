@@ -1,9 +1,10 @@
 import { prisma } from '../../lib/prisma';
 import { CreateCashTransactionInput } from './cashTransaction.schema';
+import { tenantIdFilter } from '../../utils/salonScope';
 
 export class CashTransactionService {
   async getTransactions(
-    tenantId: string,
+    tenantIds: string | string[],
     startDate?: string,
     endDate?: string,
     type?: string,
@@ -13,7 +14,7 @@ export class CashTransactionService {
     const skip = (page - 1) * limit;
     const take = limit;
 
-    const where: any = { tenantId };
+    const where: any = { tenantId: tenantIdFilter(tenantIds) };
 
     if (type && type !== 'all') {
       where.type = type;
@@ -56,11 +57,11 @@ export class CashTransactionService {
     };
   }
 
-  async getTransactionById(tenantId: string, transactionId: string) {
+  async getTransactionById(tenantIds: string | string[], transactionId: string) {
     const transaction = await prisma.cashTransaction.findFirst({
       where: {
         id: transactionId,
-        tenantId
+        tenantId: tenantIdFilter(tenantIds)
       },
       include: {
         createdBy: {
@@ -106,11 +107,11 @@ export class CashTransactionService {
     return { transaction };
   }
 
-  async deleteTransaction(tenantId: string, transactionId: string) {
+  async deleteTransaction(tenantIds: string | string[], transactionId: string) {
     const transaction = await prisma.cashTransaction.findFirst({
       where: {
         id: transactionId,
-        tenantId
+        tenantId: tenantIdFilter(tenantIds)
       }
     });
 

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const createCashTransactionSchema = z.object({
-  type: z.enum(['DEPOSIT', 'WITHDRAWAL']),
+  type: z.enum(['DEPOSIT', 'WITHDRAWAL', 'REFUND']),
   amount: z.number().positive(),
   paymentMethod: z.enum(['CASH', 'CARD', 'BANK_TRANSFER', 'CHECK', 'ONLINE']),
   notes: z.string().optional()
