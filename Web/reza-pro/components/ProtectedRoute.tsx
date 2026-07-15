@@ -20,6 +20,15 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
       router.push(redirectUrl);
     }
     
+    // Global superadmins have their own section (no salon dashboard)
+    if (!loading && isAuthenticated && user?.role === 'SUPER_ADMIN') {
+      const currentPath = pathname || window.location.pathname;
+      if (!currentPath.startsWith('/superadmin')) {
+        router.push('/superadmin');
+        return;
+      }
+    }
+
     // Check if user is authenticated but email is not verified
     // Allow access to verify-email page and login page
     if (!loading && isAuthenticated && user && user.emailVerified === false) {

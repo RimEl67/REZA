@@ -2,24 +2,62 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Home, Trash2, Users, Settings, File, BarChart3, LogOut, Settings2, ChevronRight, LayoutPanelLeft, Calendar, Clock, Filter, UserCheck, Building, TrendingUp, FileText, ChevronDown, Bell, Menu, CreditCard, LifeBuoy, X } from 'lucide-react';
+import { Home, Trash2, Users, Settings, File, BarChart3, LogOut, Settings2, ChevronRight, LayoutPanelLeft, Calendar, Filter, UserCheck, Building, TrendingUp, FileText, ChevronDown, Bell, Menu, CreditCard, LifeBuoy, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
 import { api } from '@/lib/api';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import { SalonFilterControl } from '@/components/SalonFilterControl';
 
 const menuItems = [
 	{ name: 'Agenda', href: '/dashboard/rendez-vous', icon: Home },
+	{ name: 'Salons', href: '/dashboard/mes-salons', icon: Building },
 	{ name: 'Clients', href: '/dashboard/clients/fichier-client/gestion', icon: Users },
 	{ name: 'Caisse', href: '/dashboard/caisse', icon: CreditCard },
-	{ name: 'Horaires', href: '/dashboard/admin/param-etablissement/gestion-horaires-delais', icon: Clock },
 	{ name: 'Admin', href: '/dashboard/admin/param-agenda/gestion-de-prestations', icon: Settings2 },
 ];
 
+/** Align API appointment status with agenda sidebar filter values (same map as rendez-vous page). */
+const API_STATUS_TO_FILTER: Record<string, string> = {
+	PENDING: 'pending',
+	CONFIRMED: 'confirmed',
+	IN_PROGRESS: 'in_progress',
+	COMPLETED: 'completed',
+	CANCELLED: 'cancelled',
+	NO_SHOW: 'no_show',
+};
+
+function toAgendaFilterStatus(apiStatus: string): string {
+	return API_STATUS_TO_FILTER[apiStatus] || String(apiStatus || '').toLowerCase();
+}
+
+function appointmentEmployeeName(apt: { employee?: { firstName?: string; lastName?: string } | null }): string {
+	if (!apt.employee) return '';
+	return `${apt.employee.firstName || ''} ${apt.employee.lastName || ''}`.trim();
+}
+
+/** Same rules as agenda grid: status + employee filters. */
+function matchesAgendaFilters(
+	apt: { status: string; employee?: { firstName?: string; lastName?: string } | null },
+	statusFilter: string,
+	selectedEmployee: string
+): boolean {
+	const status = toAgendaFilterStatus(apt.status);
+	if (statusFilter !== 'all' && status !== statusFilter) return false;
+
+	if (selectedEmployee !== 'all') {
+		const name = appointmentEmployeeName(apt);
+		if (!name) return false;
+		return name.toLowerCase() === selectedEmployee.trim().toLowerCase();
+	}
+	return true;
+}
+
 // Sidebar content components remain the same
 const RendezVousSidebar = () => {
-	const { isAuthenticated } = useAuth();
+	const { isAuthenticated, salonFilter, effectiveSalonIds } = useAuth();
+	const salonFilterKey = salonFilter === 'all' ? 'all' : effectiveSalonIds.join(',');
 	const [mounted, setMounted] = useState(false);
 	const [selectedDate, setSelectedDate] = useState(() => {
 		const date = new Date();
@@ -30,7 +68,7 @@ const RendezVousSidebar = () => {
 	const [statusFilter, setStatusFilter] = useState('all');
 	const [monthYear, setMonthYear] = useState('');
 	const [employees, setEmployees] = useState<Array<{id: string, name: string, color: string}>>([]);
-	const [appointmentsByDate, setAppointmentsByDate] = useState<Record<string, number>>({});
+	const [monthAppointments, setMonthAppointments] = useState<any[]>([]);
 	const [loading, setLoading] = useState(false);
 
 	// Fetch employees from API
@@ -62,9 +100,9 @@ const RendezVousSidebar = () => {
 		};
 		
 		fetchEmployees();
-	}, [isAuthenticated]);
+	}, [isAuthenticated, salonFilterKey]);
 	
-	// Fetch appointments for the current month to show counts
+	// Fetch month appointments; day dots derived from filtered set below
 	useEffect(() => {
 		if (!isAuthenticated || !mounted) return;
 		
@@ -81,23 +119,27 @@ const RendezVousSidebar = () => {
 					limit: 1000
 				});
 				
-				const appointments = response.appointments || [];
-				const counts: Record<string, number> = {};
-				
-				appointments.forEach((apt: any) => {
-					const date = new Date(apt.startTime);
-					const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-					counts[dateKey] = (counts[dateKey] || 0) + 1;
-				});
-				
-				setAppointmentsByDate(counts);
+				setMonthAppointments(response.appointments || []);
 			} catch (err) {
 				console.error('Error fetching appointments:', err);
+				setMonthAppointments([]);
 			}
 		};
 		
 		fetchAppointments();
-	}, [isAuthenticated, mounted, selectedDate]);
+	}, [isAuthenticated, mounted, selectedDate, salonFilterKey]);
+
+	// Day dots = counts after same statut + employé filters as agenda list
+	const appointmentsByDate = useMemo(() => {
+		const counts: Record<string, number> = {};
+		monthAppointments.forEach((apt: any) => {
+			if (!matchesAgendaFilters(apt, statusFilter, selectedEmployee)) return;
+			const date = new Date(apt.startTime);
+			const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+			counts[dateKey] = (counts[dateKey] || 0) + 1;
+		});
+		return counts;
+	}, [monthAppointments, statusFilter, selectedEmployee]);
 	
 	useEffect(() => {
 		setMounted(true);
@@ -296,7 +338,6 @@ const RendezVousSidebar = () => {
 							{ value: 'all', label: 'Tous', color: 'gray' },
 							{ value: 'confirmed', label: 'Confirmé', color: 'green' },
 							{ value: 'pending', label: 'En attente', color: 'yellow' },
-							{ value: 'in_progress', label: 'En cours', color: 'blue' },
 							{ value: 'completed', label: 'Terminé', color: 'emerald' },
 							{ value: 'cancelled', label: 'Annulé', color: 'red' },
 							{ value: 'no_show', label: 'Absent', color: 'orange' }
@@ -484,7 +525,6 @@ const AdminSidebar = () => {
 		{ label: 'Informations Landing Page', path: '/dashboard/admin/param-etablissement/informations-landing-page' },
 		{ label: 'Descriptif établissement', path: '/dashboard/admin/param-etablissement/descriptif-etablissement' },
 		{ label: 'Gestion photos', path: '/dashboard/admin/param-etablissement/gestion-photos' },
-		{ label: 'Gestion horaires et délais', path: '/dashboard/admin/param-etablissement/gestion-horaires-delais' },
 		{ label: 'Gestion liste d\'attente', path: '/dashboard/admin/param-etablissement/gestion-liste-attente' },
 		{ label: 'Gestion messages', path: '/dashboard/admin/param-etablissement/gestion-message' },
 		{ label: 'Notifications RDV Web', path: '/dashboard/admin/param-etablissement/notifications-rdv-web' },
@@ -819,7 +859,7 @@ const CaisseSidebar = ({
 
 export default function Sidebar() {
 	const pathname = usePathname();
-	const { logout, user, isAuthenticated } = useAuth();
+	const { logout, user, isAuthenticated, salons } = useAuth();
 	const [mounted, setMounted] = useState(false);
 	const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 	const router = useRouter();
@@ -994,7 +1034,25 @@ export default function Sidebar() {
 	};
 
 	const getSidebarContent = () => {
-		if (pathname?.startsWith('/dashboard/admin')) {
+		if (
+			pathname?.startsWith('/dashboard/mes-salons') ||
+			pathname?.startsWith('/dashboard/admin/param-etablissement/gestion-horaires-delais')
+		) {
+			return (
+				<div className="flex-1 px-4 py-2">
+					<div className="px-3 py-2">
+						<h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+							<Building size={16} className="text-[#002366]" />
+							Salons
+						</h2>
+						<p className="text-xs text-gray-500 mt-2 leading-relaxed">
+							Filtrez les salons affichés dans Agenda, Clients et Caisse, ou gérez chaque établissement.
+							Les horaires se règlent par salon depuis Mes salons.
+						</p>
+					</div>
+				</div>
+			);
+		} else if (pathname?.startsWith('/dashboard/admin')) {
 			return <AdminSidebar />;
 		} else if (pathname === '/dashboard' || pathname === '/dashboard/rendez-vous') {
 			return <RendezVousSidebar />;
@@ -1025,11 +1083,12 @@ export default function Sidebar() {
 						{menuItems.map((item) => {
 							const Icon = item.icon;
 							// Make 'Clients' active for all /dashboard/clients routes
-							// Make 'Horaires' active for business hours page
-							const isActive = item.href === '/dashboard/clients'
+							// Make 'Salons' active for horaires (nested under Mes salons)
+							const isActive = item.href === '/dashboard/clients/fichier-client/gestion'
 							  ? pathname?.startsWith('/dashboard/clients')
-							  : item.href === '/dashboard/admin/param-etablissement/gestion-horaires-delais'
-							  ? pathname === item.href
+							  : item.href === '/dashboard/mes-salons'
+							  ? pathname === item.href ||
+							    pathname?.startsWith('/dashboard/admin/param-etablissement/gestion-horaires-delais')
 							  : pathname === item.href;
 							return (
 								<Link
@@ -1050,6 +1109,11 @@ export default function Sidebar() {
 
 					{/* Right Section - Actions & Profile */}
 					<div className="flex items-center gap-3">
+						{/* Global multi-salon filter */}
+						{mounted && salons.length > 1 && (
+							<SalonFilterControl />
+						)}
+
 						{/* Notifications */}
 						<button className="relative p-2.5 rounded-full text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all" onClick={() => setShowNotificationSidebar(true)}>
 							<Bell size={20} strokeWidth={2} />

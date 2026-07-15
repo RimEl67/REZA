@@ -101,7 +101,8 @@ const mapBackendToFrontend = (backendClient: BackendClient, appointments?: any[]
 };
 
 export default function ClientsGestionPage() {
-  const { user } = useAuth();
+  const { user, salonFilter, effectiveSalonIds, isSalonFilterMulti, salons } = useAuth();
+  const salonFilterKey = salonFilter === 'all' ? 'all' : effectiveSalonIds.join(',');
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -115,6 +116,7 @@ export default function ClientsGestionPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [clientToDelete, setClientToDelete] = useState<Client | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [createTenantId, setCreateTenantId] = useState('');
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -197,7 +199,7 @@ export default function ClientsGestionPage() {
       fetchClients();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user, salonFilterKey]);
 
   // Handle search and filter changes with debouncing
   useEffect(() => {
@@ -209,10 +211,13 @@ export default function ClientsGestionPage() {
       return () => clearTimeout(timer);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm, statusFilter]);
+  }, [searchTerm, statusFilter, salonFilterKey]);
 
   const handleAddClient = () => {
     setEditingClient(null);
+    setCreateTenantId(
+      !isSalonFilterMulti && effectiveSalonIds.length === 1 ? effectiveSalonIds[0] : ''
+    );
     setFormData({
       firstName: '',
       lastName: '',
@@ -294,6 +299,11 @@ export default function ClientsGestionPage() {
         });
         toast.success(`Client "${firstName} ${lastName}" modifié avec succès`);
       } else {
+        if (isSalonFilterMulti && !createTenantId) {
+          toast.error('Veuillez sélectionner un salon');
+          setSaving(false);
+          return;
+        }
         // Create client
         await api.createClient({
           firstName,
@@ -302,7 +312,8 @@ export default function ClientsGestionPage() {
           phone: formData.phone,
           address: formData.address || undefined,
           status: formData.status === 'Active' ? 'ACTIVE' : 'INACTIVE',
-          notes: formData.notes || undefined
+          notes: formData.notes || undefined,
+          ...(createTenantId ? { tenantId: createTenantId } : {}),
         });
         toast.success(`Client "${firstName} ${lastName}" créé avec succès`);
       }
@@ -441,7 +452,7 @@ export default function ClientsGestionPage() {
       `}</style>
 
       {/* Header */}
-      <div className="mb-8 pt-20 animate-slideUp">
+      <div className="mb-8 animate-slideUp">
         <div className="flex items-center justify-between">
           <div className="flex items-baseline gap-4">
             <h1 className="text-5xl font-light text-gray-900 tracking-tight">Gestion des Clients</h1>
@@ -873,6 +884,26 @@ export default function ClientsGestionPage() {
             {/* Form */}
             <form onSubmit={handleSubmit} className="px-8 py-6">
               <div className="space-y-6">
+                {!editingClient && isSalonFilterMulti && (
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700">Salon *</label>
+                    <select
+                      value={createTenantId}
+                      onChange={(e) => setCreateTenantId(e.target.value)}
+                      required
+                      className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900"
+                    >
+                      <option value="">Choisir un salon</option>
+                      {salons
+                        .filter((s) => effectiveSalonIds.includes(s.id))
+                        .map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
                 {/* Personal Info */}
                 <div className="space-y-4">
                   <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider">Informations personnelles</h3>

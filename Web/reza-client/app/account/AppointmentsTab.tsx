@@ -1,9 +1,34 @@
-import { ChevronRight, Clock, Calendar, User, MapPin, Phone, CreditCard, Tag, Star, ArrowLeft } from 'lucide-react';
-import React, { useState } from 'react';
+import { ChevronLeft, ChevronRight, Clock, Calendar, User, MapPin, Phone, CreditCard, Tag, Star, ArrowLeft } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
 import EditAppointmentModal from './EditAppointmentModal';
 import DeleteModal from './dialogue/deletemodal';
 import api from '../../lib/api';
 import { formatMoroccoDate, getImageUrl } from '../../lib/utils';
+
+const PAGE_SIZE = 8;
+
+function getStatusBadgeClass(status: string): string {
+  switch (status?.toLowerCase()) {
+    case 'confirmed':
+      return 'bg-emerald-50 text-emerald-700 border border-emerald-100';
+    case 'pending':
+      return 'bg-amber-50 text-amber-800 border border-amber-100';
+    case 'completed':
+      return 'bg-gray-900 text-white border border-[#0000001c]';
+    case 'in_progress':
+      return 'bg-sky-50 text-sky-700 border border-sky-100';
+    case 'cancelled':
+    case 'no_show':
+      return 'bg-rose-50 text-rose-700 border border-rose-100';
+    default:
+      return 'bg-gray-50 text-gray-600 border border-gray-200';
+  }
+}
+
+function canCancelAppointment(status: string): boolean {
+  const s = status?.toLowerCase();
+  return s === 'pending' || s === 'confirmed';
+}
 
 interface Appointment {
   id: string;
@@ -74,6 +99,19 @@ const AppointmentsTab: React.FC<AppointmentsTabProps> = ({
   const [editData, setEditData] = useState<any>(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelSuccess, setCancelSuccess] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const totalPages = Math.max(1, Math.ceil(appointments.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
+  const paginatedAppointments = useMemo(() => {
+    const start = (safePage - 1) * PAGE_SIZE;
+    return appointments.slice(start, start + PAGE_SIZE);
+  }, [appointments, safePage]);
 
   const handleAppointmentClick = (apt: Appointment) => {
     setSelectedAppointment(apt);
@@ -304,9 +342,7 @@ const AppointmentsTab: React.FC<AppointmentsTabProps> = ({
                 />
                 {/* Status badge absolutely positioned in top right, now smaller */}
                 <div className={`absolute top-3 right-3 px-3 py-1 text-[11px] font-light tracking-widest rounded-full ${
-                  selectedAppointment.status === 'confirmed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
-                  selectedAppointment.status === 'completed' ? 'bg-gray-50 text-gray-600 border border-gray-200' :
-                  'bg-rose-50 text-rose-700 border border-rose-100'
+                  getStatusBadgeClass(selectedAppointment.status)
                 }`}>
                   {getStatusText(selectedAppointment.status)}
                 </div>
@@ -812,7 +848,12 @@ const AppointmentsTab: React.FC<AppointmentsTabProps> = ({
                     {cancelError}
                   </div>
                 )}
-                {selectedAppointment.status === 'confirmed' && (
+                {selectedAppointment.status === 'pending' && (
+                  <div className="bg-amber-50 border border-amber-100 text-amber-800 rounded-xl px-4 py-3 text-sm font-light">
+                    En attente de confirmation par l&apos;établissement. Vous serez notifié une fois le rendez-vous confirmé.
+                  </div>
+                )}
+                {canCancelAppointment(selectedAppointment.status) && (
                   <button 
                     className="w-full py-4 border border-gray-200 hover:border-rose-300 hover:bg-rose-50 text-gray-600 hover:text-rose-700 text-sm font-light tracking-wide transition-all rounded-full"
                     onClick={handleCancelClick}
@@ -906,12 +947,15 @@ const AppointmentsTab: React.FC<AppointmentsTabProps> = ({
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl sm:text-2xl font-extralight text-gray-900 tracking-tight mb-2">Rendez-vous</h2>
-          <p className="text-xs text-gray-400 tracking-wide font-light">{appointments.length} réservations</p>
+          <p className="text-xs text-gray-400 tracking-wide font-light">
+            {appointments.length} réservation{appointments.length !== 1 ? 's' : ''}
+            {appointments.length > PAGE_SIZE ? ` · page ${safePage}/${totalPages}` : ''}
+          </p>
         </div>
       </div>
 
       <div className="space-y-4">
-        {appointments.map((apt: Appointment) => (
+        {paginatedAppointments.map((apt: Appointment) => (
           <div 
             key={apt.id} 
             onClick={() => handleAppointmentClick(apt)}
@@ -945,11 +989,16 @@ const AppointmentsTab: React.FC<AppointmentsTabProps> = ({
                   <div className="text-[10px] sm:text-xs text-gray-400 tracking-wide font-light mb-1 sm:mb-2">PROFESSIONNEL</div>
                   <div className="text-xs sm:text-sm font-light text-gray-900 mb-1">{apt.professional || 'Non assigné'}</div>
                   <div className="text-[10px] sm:text-xs text-gray-400 font-light">{apt.price || 0} MAD</div>
+                  {apt.status === 'pending' && (
+                    <div className="text-[10px] sm:text-xs text-amber-700 font-light mt-1">
+                      En attente du salon
+                    </div>
+                  )}
                 </div>
 
                 {/* Desktop status column - hidden on mobile and tablet */}
                 <div className="hidden lg:flex items-center justify-end gap-4 lg:col-span-2">
-                  {apt.status === 'confirmed' && (
+                  {canCancelAppointment(apt.status) && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -962,11 +1011,7 @@ const AppointmentsTab: React.FC<AppointmentsTabProps> = ({
                       Annuler
                     </button>
                   )}
-                  <div className={`px-3 py-1 text-xs font-light tracking-wide rounded-full ${
-                    apt.status === 'confirmed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
-                    apt.status === 'completed' ? 'bg-gray-900 text-white border border-[#0000001c]' :
-                    'bg-rose-50 text-rose-700 border border-rose-100'
-                  }`}>
+                  <div className={`px-3 py-1 text-xs font-light tracking-wide rounded-full ${getStatusBadgeClass(apt.status)}`}>
                     {getStatusText(apt.status)}
                   </div>
                   <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-gray-900 transition-colors" />
@@ -976,14 +1021,10 @@ const AppointmentsTab: React.FC<AppointmentsTabProps> = ({
               {/* Mobile/Tablet status - shown on small screens */}
               <div className="flex items-center justify-between w-full sm:w-auto lg:hidden">
                 <div className="flex items-center gap-2">
-                  <div className={`px-2.5 sm:px-3 py-1 text-[10px] sm:text-xs font-light tracking-wide rounded-full ${
-                    apt.status === 'confirmed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
-                    apt.status === 'completed' ? 'bg-gray-900 text-white border border-[#0000001c]' :
-                    'bg-rose-50 text-rose-700 border border-rose-100'
-                  }`}>
+                  <div className={`px-2.5 sm:px-3 py-1 text-[10px] sm:text-xs font-light tracking-wide rounded-full ${getStatusBadgeClass(apt.status)}`}>
                     {getStatusText(apt.status)}
                   </div>
-                  {apt.status === 'confirmed' && (
+                  {canCancelAppointment(apt.status) && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1003,6 +1044,34 @@ const AppointmentsTab: React.FC<AppointmentsTabProps> = ({
           </div>
         ))}
       </div>
+
+      {appointments.length > PAGE_SIZE && (
+        <div className="flex items-center justify-center gap-4 pt-2">
+          <button
+            type="button"
+            disabled={safePage <= 1}
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            className="inline-flex items-center gap-1 px-4 py-2 rounded-full border border-gray-300 text-sm font-light text-gray-700 hover:border-gray-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            aria-label="Page précédente"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            Précédent
+          </button>
+          <span className="text-sm text-gray-500 tabular-nums font-light">
+            {safePage} / {totalPages}
+          </span>
+          <button
+            type="button"
+            disabled={safePage >= totalPages}
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            className="inline-flex items-center gap-1 px-4 py-2 rounded-full border border-gray-300 text-sm font-light text-gray-700 hover:border-gray-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            aria-label="Page suivante"
+          >
+            Suivant
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 };

@@ -3,7 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../constants.dart';
 import '../models/family_member.dart';
-import '../providers/auth_provider.dart';
+import '../viewmodels/auth_viewmodel.dart';
 import '../services/account_service.dart';
 import '../services/api_client.dart';
 import '../services/booking_for_proche.dart';
@@ -60,7 +60,7 @@ class _BookingScreenState extends State<BookingScreen> {
     }
     _selectedDate = DateTime.now();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final user = context.read<AuthProvider>().user;
+      final user = context.read<AuthViewModel>().user;
       if (user != null) {
         _emailController.text = user.email;
         _firstNameController.text = user.firstName;
@@ -99,7 +99,7 @@ class _BookingScreenState extends State<BookingScreen> {
   }
 
   Future<void> _loadFamily() async {
-    final auth = context.read<AuthProvider>();
+    final auth = context.read<AuthViewModel>();
     if (!auth.isAuthenticated || auth.email == null) {
       setState(() {
         _familyMembers = [];
@@ -240,7 +240,7 @@ class _BookingScreenState extends State<BookingScreen> {
   }
 
   void _continueFromDate() {
-    final auth = context.read<AuthProvider>();
+    final auth = context.read<AuthViewModel>();
     final user = auth.user;
     final hasPhone = user?.phone != null && user!.phone!.isNotEmpty;
     final contactStep = _isGroupBooking ? 4 : 3;
@@ -253,7 +253,7 @@ class _BookingScreenState extends State<BookingScreen> {
 
   Future<void> _submitBooking() async {
     if (_submitting) return;
-    final auth = context.read<AuthProvider>();
+    final auth = context.read<AuthViewModel>();
     final user = auth.user;
 
     final firstName = (user?.firstName.isNotEmpty == true)
@@ -516,7 +516,7 @@ class _BookingScreenState extends State<BookingScreen> {
   }
 
   Widget _buildPeopleStep() {
-    final auth = context.watch<AuthProvider>();
+    final auth = context.watch<AuthViewModel>();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

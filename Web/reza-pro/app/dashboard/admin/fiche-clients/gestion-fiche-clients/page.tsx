@@ -166,7 +166,7 @@ const GestionFicheClients = () => {
       )}
 
       {/* Header */}
-      <div className="mb-8 animate-slideDown pt-20">
+      <div className="mb-8 animate-slideDown">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-8">
             <div className="flex flex-col gap-2">

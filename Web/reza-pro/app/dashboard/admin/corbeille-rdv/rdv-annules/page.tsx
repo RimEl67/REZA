@@ -171,7 +171,7 @@ export default function CancelledAppointments() {
       `}</style>
 
       {/* Header */}
-      <div className="mb-8 animate-slideDown pt-20">
+      <div className="mb-8 animate-slideDown">
         <div className="flex items-center justify-between mb-6">
           {/* Left: Title */}
           <div className="flex items-center gap-8">

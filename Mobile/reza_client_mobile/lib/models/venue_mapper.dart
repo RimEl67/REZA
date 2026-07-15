@@ -83,3 +83,11 @@ VenueItem tenantToVenueItem(
 }) =>
     venueMapToItem(tenantToVenue(t), services: services);
 
+/// Distance + location when GPS/API returned km; otherwise location only (no fake km).
+String venueMetaLine(VenueItem venue) {
+  if (venue.distance.isNotEmpty) {
+    return '${venue.distance} · ${venue.location}';
+  }
+  return venue.location;
+}
+

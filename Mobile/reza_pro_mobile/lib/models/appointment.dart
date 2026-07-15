@@ -1,152 +1,185 @@
 class Appointment {
-  final int id;
+  final String id;
+  final String clientId;
   final String clientName;
+  final String serviceId;
   final String service;
-  final String time;
-  final int duration; // in minutes
-  final String status; // 'confirmed' | 'pending' | 'cancelled'
+  final double? servicePrice;
+  final String? employeeId;
   final String employee;
+  final String time;
+  final int duration;
+  /// UI status: confirmed | pending | cancelled | completed | in_progress | no_show
+  final String status;
   final String? phone;
   final String? email;
   final DateTime date;
   final String? notes;
+  final DateTime? startTime;
+  final String? tenantId;
 
   Appointment({
     required this.id,
+    this.clientId = '',
     required this.clientName,
+    this.serviceId = '',
     required this.service,
+    this.servicePrice,
+    this.employeeId,
+    required this.employee,
     required this.time,
     required this.duration,
     required this.status,
-    required this.employee,
     this.phone,
     this.email,
     required this.date,
     this.notes,
+    this.startTime,
+    this.tenantId,
   });
 
   Appointment copyWith({
-    int? id,
+    String? id,
+    String? clientId,
     String? clientName,
+    String? serviceId,
     String? service,
+    double? servicePrice,
+    String? employeeId,
+    String? employee,
     String? time,
     int? duration,
     String? status,
-    String? employee,
     String? phone,
     String? email,
     DateTime? date,
     String? notes,
+    DateTime? startTime,
+    String? tenantId,
   }) {
     return Appointment(
       id: id ?? this.id,
+      clientId: clientId ?? this.clientId,
       clientName: clientName ?? this.clientName,
+      serviceId: serviceId ?? this.serviceId,
       service: service ?? this.service,
+      servicePrice: servicePrice ?? this.servicePrice,
+      employeeId: employeeId ?? this.employeeId,
+      employee: employee ?? this.employee,
       time: time ?? this.time,
       duration: duration ?? this.duration,
       status: status ?? this.status,
-      employee: employee ?? this.employee,
       phone: phone ?? this.phone,
       email: email ?? this.email,
       date: date ?? this.date,
       notes: notes ?? this.notes,
+      startTime: startTime ?? this.startTime,
+      tenantId: tenantId ?? this.tenantId,
     );
   }
-}
 
-List<Appointment> generateMockAppointments() {
-  final now = DateTime.now();
-  final today = DateTime(now.year, now.month, now.day);
+  static bool canConfirm(String status) => status == 'pending';
 
-  return [
-    Appointment(
-      id: 1,
-      clientName: 'Yasmine Benali',
-      service: 'Coupe + Brushing',
-      time: '09:00',
-      duration: 60,
-      status: 'confirmed',
-      employee: 'Samira Bouzid',
-      phone: '+212 6 61 23 45 67',
-      email: 'yasmine.benali@gmail.com',
-      date: today,
-    ),
-    Appointment(
-      id: 2,
-      clientName: 'Khalid Amrani',
-      service: 'Barbe + Coupe',
-      time: '10:30',
-      duration: 45,
-      status: 'confirmed',
-      employee: 'Yassine El Fassi',
-      phone: '+212 6 62 34 56 78',
-      date: today,
-    ),
-    Appointment(
-      id: 3,
-      clientName: 'Nadia Alaoui',
-      service: 'Coloration',
-      time: '11:00',
-      duration: 90,
-      status: 'pending',
-      employee: 'Samira Bouzid',
-      phone: '+212 6 63 45 67 89',
-      date: today,
-    ),
-    Appointment(
-      id: 4,
-      clientName: 'Omar Tazi',
-      service: 'Soin du visage',
-      time: '14:00',
-      duration: 60,
-      status: 'confirmed',
-      employee: 'Khalid Ait Lahcen',
-      phone: '+212 6 64 56 78 90',
-      date: today,
-    ),
-    Appointment(
-      id: 5,
-      clientName: 'Fatima Zahra',
-      service: 'Manucure',
-      time: '15:30',
-      duration: 45,
-      status: 'cancelled',
-      employee: 'Nadia El Khatib',
-      phone: '+212 6 65 67 89 01',
-      date: today,
-    ),
-    Appointment(
-      id: 6,
-      clientName: 'Hicham Berrada',
-      service: 'Massage relaxant',
-      time: '16:30',
-      duration: 60,
-      status: 'pending',
-      employee: 'Khalid Ait Lahcen',
-      phone: '+212 6 66 78 90 12',
-      date: today,
-    ),
-    Appointment(
-      id: 7,
-      clientName: 'Sofia Chraibi',
-      service: 'Épilation',
-      time: '17:30',
-      duration: 30,
-      status: 'confirmed',
-      employee: 'Nadia El Khatib',
-      phone: '+212 6 67 89 01 23',
-      date: today.add(const Duration(days: 1)),
-    ),
-    Appointment(
-      id: 8,
-      clientName: 'Mehdi Kettani',
-      service: 'Coupe homme',
-      time: '09:30',
-      duration: 30,
-      status: 'confirmed',
-      employee: 'Yassine El Fassi',
-      phone: '+212 6 68 90 12 34',
-      date: today.add(const Duration(days: 1)),
-    ),
-  ];
+  static bool canMarkAbsentOrDone(String status) =>
+      status == 'pending' || status == 'confirmed' || status == 'in_progress';
+
+  static String labelFr(String status) {
+    switch (status) {
+      case 'confirmed':
+        return 'Confirmé';
+      case 'pending':
+        return 'En attente';
+      case 'cancelled':
+        return 'Annulé';
+      case 'completed':
+        return 'Terminé';
+      case 'in_progress':
+        return 'En cours';
+      case 'no_show':
+        return 'Absent';
+      default:
+        return status;
+    }
+  }
+
+  static String uiStatus(String? backend) {
+    switch ((backend ?? '').toUpperCase()) {
+      case 'CONFIRMED':
+        return 'confirmed';
+      case 'PENDING':
+        return 'pending';
+      case 'CANCELLED':
+        return 'cancelled';
+      case 'COMPLETED':
+        return 'completed';
+      case 'IN_PROGRESS':
+        return 'in_progress';
+      case 'NO_SHOW':
+        return 'no_show';
+      default:
+        return (backend ?? 'pending').toLowerCase();
+    }
+  }
+
+  static String backendStatus(String ui) {
+    switch (ui.toLowerCase()) {
+      case 'confirmed':
+        return 'CONFIRMED';
+      case 'pending':
+        return 'PENDING';
+      case 'cancelled':
+        return 'CANCELLED';
+      case 'completed':
+        return 'COMPLETED';
+      case 'in_progress':
+        return 'IN_PROGRESS';
+      case 'no_show':
+        return 'NO_SHOW';
+      default:
+        return ui.toUpperCase();
+    }
+  }
+
+  factory Appointment.fromJson(Map<String, dynamic> json) {
+    final client = json['client'] as Map<String, dynamic>?;
+    final service = json['service'] as Map<String, dynamic>?;
+    final employee = json['employee'] as Map<String, dynamic>?;
+    final start = DateTime.tryParse(json['startTime']?.toString() ?? '')?.toLocal();
+    final date = start != null
+        ? DateTime(start.year, start.month, start.day)
+        : DateTime.now();
+    final time = start != null
+        ? '${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}'
+        : '00:00';
+    final clientName = client != null
+        ? '${client['firstName'] ?? ''} ${client['lastName'] ?? ''}'.trim()
+        : 'Client';
+    final employeeName = employee != null
+        ? '${employee['firstName'] ?? ''} ${employee['lastName'] ?? ''}'.trim()
+        : '—';
+    final price = (service?['price'] as num?)?.toDouble() ??
+        (service?['priceFrom'] as num?)?.toDouble();
+
+    return Appointment(
+      id: json['id']?.toString() ?? '',
+      clientId: client?['id']?.toString() ?? json['clientId']?.toString() ?? '',
+      clientName: clientName.isEmpty ? 'Client' : clientName,
+      serviceId: service?['id']?.toString() ?? json['serviceId']?.toString() ?? '',
+      service: service?['name']?.toString() ?? 'Service',
+      servicePrice: price,
+      employeeId: employee?['id']?.toString() ?? json['employeeId']?.toString(),
+      employee: employeeName.isEmpty ? '—' : employeeName,
+      time: time,
+      duration: (json['duration'] as num?)?.toInt() ??
+          (service?['duration'] as num?)?.toInt() ??
+          60,
+      status: uiStatus(json['status']?.toString()),
+      phone: client?['phone']?.toString(),
+      email: client?['email']?.toString(),
+      date: date,
+      notes: json['notes']?.toString(),
+      startTime: start,
+      tenantId: json['tenantId']?.toString(),
+    );
+  }
 }

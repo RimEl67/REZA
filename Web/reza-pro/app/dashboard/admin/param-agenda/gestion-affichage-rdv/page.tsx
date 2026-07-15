@@ -193,7 +193,7 @@ const GestionAffichageRDV = () => {
       `}</style>
 
       {/* Header */}
-      <div className="mb-8 animate-slideUp pt-20">
+      <div className="mb-8 animate-slideUp">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
           <div>
             <h1 className="text-4xl md:text-5xl font-light text-gray-900 tracking-tight mb-2">

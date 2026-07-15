@@ -74,7 +74,7 @@ const GestionMessages = () => {
       )}
 
       {/* Header */}
-      <div className="mb-8 animate-slideDown mt-20">
+      <div className="mb-8 animate-slideDown">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-4xl md:text-5xl font-light text-gray-900 tracking-tight mb-2">

@@ -5,6 +5,8 @@ import 'package:latlong2/latlong.dart' hide Path;
 import '../constants.dart';
 import '../models/venue_mapper.dart';
 import '../services/discovery_service.dart';
+import '../services/location_service.dart';
+import '../widgets/geo_prompt_banner.dart';
 import 'venue_detail_screen.dart';
 
 class SearchResultsScreen extends StatefulWidget {
@@ -17,31 +19,77 @@ class SearchResultsScreen extends StatefulWidget {
 class _SearchResultsScreenState extends State<SearchResultsScreen> {
   final Set<String> _likedVenues = {};
   final List<String> _recentSearches = ['Coupes et coiffures'];
-  List<VenueItem> _results = List.from(allVenues);
+  List<VenueItem> _results = [];
   bool _loading = true;
+  String? _loadError;
   String _queryLabel = 'Toutes les prestations';
-  final String _city = 'Casablanca';
+  /// Empty = no city filter.
+  String _city = '';
+  double? _userLat;
+  double? _userLng;
+  bool _geoLoading = false;
+  String? _geoError;
+  bool? _showGeoPrompt;
+
+  bool get _hasUserLocation => _userLat != null && _userLng != null;
+  String get _cityLabel => _city.isEmpty ? 'Toutes les villes' : _city;
 
   @override
   void initState() {
     super.initState();
     _loadTenants();
+    _initGeoPrompt();
   }
 
-  Future<void> _loadTenants({String? search, String? category}) async {
-    setState(() => _loading = true);
+  Future<void> _initGeoPrompt() async {
+    if (await locationService.wasPromptDismissed()) {
+      if (!mounted) return;
+      setState(() => _showGeoPrompt = false);
+      return;
+    }
+    if (await locationService.wasGrantedBefore()) {
+      await _requestUserLocation();
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _showGeoPrompt = true);
+  }
+
+  Future<void> _loadTenants({String? search, String? category, String? city}) async {
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
     try {
-      final tenants = await discoveryService.searchTenants(
+      final cityFilter = city ?? _city;
+      final cityArg = cityFilter.isNotEmpty ? cityFilter : null;
+      // Nearby radius first; if empty (emulator GPS far from salons), retry
+      // without radius. Never fall back to mock allVenues (fake ids → 404).
+      var tenants = await discoveryService.searchTenants(
         search: search,
         category: category,
-        city: _city,
+        city: cityArg,
+        lat: _userLat,
+        lng: _userLng,
+        radiusKm: _hasUserLocation ? 10 : null,
         limit: 50,
       );
-      final mapped = tenants.map((t) => tenantToVenueItem(t)).toList();
+      if (tenants.isEmpty && _hasUserLocation) {
+        tenants = await discoveryService.searchTenants(
+          search: search,
+          category: category,
+          city: cityArg,
+          lat: _userLat,
+          lng: _userLng,
+          limit: 50,
+        );
+      }
+      final mapped = tenants.map(tenantToVenueItem).toList();
       if (!mounted) return;
       setState(() {
-        _results = mapped.isNotEmpty ? mapped : List.from(allVenues);
+        _results = mapped;
         _loading = false;
+        if (city != null) _city = city;
         if (search != null && search.isNotEmpty) {
           _queryLabel = search;
           if (!_recentSearches.contains(search)) {
@@ -51,13 +99,52 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
           _queryLabel = category;
         }
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
-        _results = List.from(allVenues);
+        _results = [];
         _loading = false;
+        _loadError = e.toString();
       });
     }
+  }
+
+  Future<void> _requestUserLocation() async {
+    setState(() {
+      _geoLoading = true;
+      _geoError = null;
+      _showGeoPrompt = true;
+    });
+    final result = await locationService.requestUserLocation();
+    if (!mounted) return;
+    if (result.ok && result.location != null) {
+      setState(() {
+        _userLat = result.location!.lat;
+        _userLng = result.location!.lng;
+        _geoError = null;
+        _showGeoPrompt = false;
+        _geoLoading = false;
+      });
+      await _loadTenants();
+      return;
+    }
+    setState(() {
+      _userLat = null;
+      _userLng = null;
+      _geoError = result.error;
+      _showGeoPrompt = true;
+      _geoLoading = false;
+    });
+    await _loadTenants();
+  }
+
+  Future<void> _dismissGeoPrompt() async {
+    await locationService.markPromptDismissed();
+    if (!mounted) return;
+    setState(() {
+      _showGeoPrompt = false;
+      _geoError = null;
+    });
   }
 
   void _showSearchModal() {
@@ -70,10 +157,15 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
       ),
       builder: (context) => _SearchModal(
         recentSearches: _recentSearches,
+        cityHint: _cityLabel,
         onClearRecent: () => setState(() => _recentSearches.clear()),
-        onSearch: (query, category) {
+        onSearch: (query, category, {String? city}) {
           Navigator.pop(context);
-          _loadTenants(search: query, category: category);
+          _loadTenants(search: query, category: category, city: city);
+        },
+        onUseMyLocation: () {
+          Navigator.pop(context);
+          _requestUserLocation();
         },
       ),
     );
@@ -185,7 +277,7 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
                             style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textDark),
                           ),
                           Text(
-                            _city,
+                            _cityLabel,
                             style: GoogleFonts.inter(fontSize: 12, color: AppColors.textGray),
                           ),
                         ],
@@ -290,17 +382,38 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
                             ),
                           ),
                           const SizedBox(height: 16),
+                          if ((_showGeoPrompt == true || _geoError != null) && !_hasUserLocation)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                              child: GeoPromptBanner(
+                                loading: _geoLoading,
+                                error: _geoError,
+                                onUseLocation: _requestUserLocation,
+                                onDismiss: _dismissGeoPrompt,
+                              ),
+                            ),
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 20),
                             child: Row(
                               children: [
                                 Text(
-                                  '${results.length} établissements à proximité',
+                                  _hasUserLocation
+                                      ? '${results.length} établissements à proximité'
+                                      : '${results.length} établissements',
                                   style: GoogleFonts.inter(fontSize: 14, color: AppColors.textGray, fontWeight: FontWeight.w500),
                                 ),
                               ],
                             ),
                           ),
+                          if (!_loading && results.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                              child: Text(
+                                _loadError ??
+                                    'Aucun salon trouvé. Essayez une autre ville ou élargissez la recherche.',
+                                style: GoogleFonts.inter(fontSize: 13, color: AppColors.textGray),
+                              ),
+                            ),
                           const SizedBox(height: 16),
                         ],
                       ),
@@ -434,7 +547,7 @@ class _VenueCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              '${venue.distance.isNotEmpty ? venue.distance : "Casablanca"} · ${venue.location}',
+              venueMetaLine(venue),
               style: GoogleFonts.inter(fontSize: 14, color: AppColors.textGray),
             ),
             const SizedBox(height: 4),
@@ -451,13 +564,17 @@ class _VenueCard extends StatelessWidget {
 
 class _SearchModal extends StatefulWidget {
   final List<String> recentSearches;
+  final String cityHint;
   final VoidCallback onClearRecent;
-  final void Function(String? query, String? category) onSearch;
+  final void Function(String? query, String? category, {String? city}) onSearch;
+  final VoidCallback onUseMyLocation;
 
   const _SearchModal({
     required this.recentSearches,
+    required this.cityHint,
     required this.onClearRecent,
     required this.onSearch,
+    required this.onUseMyLocation,
   });
 
   @override
@@ -466,6 +583,7 @@ class _SearchModal extends StatefulWidget {
 
 class _SearchModalState extends State<_SearchModal> {
   final _queryController = TextEditingController();
+  final _cityController = TextEditingController();
 
   static const _popularCategories = [
     {'icon': Icons.apps_rounded, 'label': 'Toutes les prestations'},
@@ -477,9 +595,27 @@ class _SearchModalState extends State<_SearchModal> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.cityHint != 'Toutes les villes') {
+      _cityController.text = widget.cityHint;
+    }
+  }
+
+  @override
   void dispose() {
     _queryController.dispose();
+    _cityController.dispose();
     super.dispose();
+  }
+
+  void _submit({String? category}) {
+    final city = _cityController.text.trim();
+    widget.onSearch(
+      _queryController.text.trim().isEmpty ? null : _queryController.text.trim(),
+      category,
+      city: city,
+    );
   }
 
   @override
@@ -532,14 +668,45 @@ class _SearchModalState extends State<_SearchModal> {
                               hintStyle: GoogleFonts.inter(fontSize: 14, color: AppColors.textGray),
                             ),
                             style: GoogleFonts.inter(fontSize: 14, color: AppColors.textDark),
-                            onSubmitted: (v) => widget.onSearch(v.trim(), null),
+                            onSubmitted: (_) => _submit(),
                           ),
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 10),
-                  const _InputRow(icon: Icons.location_on_outlined, placeholder: 'Casablanca'),
+                  Container(
+                    height: 52,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.location_on_outlined, size: 20, color: AppColors.textGray),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _cityController,
+                            decoration: InputDecoration(
+                              border: InputBorder.none,
+                              hintText: 'Ville (optionnel)',
+                              hintStyle: GoogleFonts.inter(fontSize: 14, color: AppColors.textGray),
+                            ),
+                            style: GoogleFonts.inter(fontSize: 14, color: AppColors.textDark),
+                            onSubmitted: (_) => _submit(),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Utiliser ma position',
+                          onPressed: widget.onUseMyLocation,
+                          icon: const Icon(Icons.my_location_rounded, size: 20, color: AppColors.primary),
+                        ),
+                      ],
+                    ),
+                  ),
                   const SizedBox(height: 10),
                   const _InputRow(icon: Icons.calendar_today_outlined, placeholder: 'À tout moment'),
                 ],
@@ -567,7 +734,7 @@ class _SearchModalState extends State<_SearchModal> {
                     ),
                     const SizedBox(height: 12),
                     ...widget.recentSearches.map((s) => GestureDetector(
-                          onTap: () => widget.onSearch(s, null),
+                          onTap: () => widget.onSearch(s, null, city: _cityController.text.trim()),
                           child: Padding(
                             padding: const EdgeInsets.only(bottom: 12),
                             child: Row(
@@ -607,9 +774,9 @@ class _SearchModalState extends State<_SearchModal> {
                       return GestureDetector(
                         onTap: () {
                           if (label.startsWith('Toutes')) {
-                            widget.onSearch(null, null);
+                            _submit();
                           } else {
-                            widget.onSearch(null, label);
+                            _submit(category: label);
                           }
                         },
                         child: Container(
@@ -645,7 +812,7 @@ class _SearchModalState extends State<_SearchModal> {
                 width: double.infinity,
                 height: 54,
                 child: ElevatedButton(
-                  onPressed: () => widget.onSearch(_queryController.text.trim().isEmpty ? null : _queryController.text.trim(), null),
+                  onPressed: () => _submit(),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.textDark,
                     foregroundColor: Colors.white,

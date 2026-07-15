@@ -94,7 +94,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                 child: Column(
                   children: [
                     Text(
-                      'Réservation confirmée !',
+                      'Réservation enregistrée !',
                       textAlign: TextAlign.center,
                       style: GoogleFonts.inter(
                         fontSize: 28,
@@ -104,7 +104,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      'Vous recevrez un rappel avant votre rendez-vous.',
+                      'Votre demande a été envoyée. L\'établissement confirmera bientôt votre rendez-vous.',
                       textAlign: TextAlign.center,
                       style: GoogleFonts.inter(
                         fontSize: 15,
@@ -166,12 +166,12 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
-                              color: AppColors.availableLight,
+                              color: const Color(0xFFFEF3C7),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
-                              'Confirmé',
-                              style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.available),
+                              'En attente',
+                              style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: const Color(0xFFF59E0B)),
                             ),
                           ),
                         ],

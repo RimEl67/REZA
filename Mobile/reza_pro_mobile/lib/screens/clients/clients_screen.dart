@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import '../../constants/app_colors.dart';
 import '../../models/client.dart';
+import '../../services/api_client.dart';
+import '../../viewmodels/clients_viewmodel.dart';
+import '../../viewmodels/auth_viewmodel.dart';
 import '../../widgets/client_card.dart';
+import '../../widgets/pro_drawer.dart';
 
 class ClientsScreen extends StatefulWidget {
   const ClientsScreen({super.key});
@@ -15,19 +20,13 @@ class _ClientsScreenState extends State<ClientsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
-  String _searchQuery = '';
-  String _sortBy = 'Nom';
-  late List<Client> _clients;
-
-  final List<String> _sortOptions = ['Nom', 'Dernière visite', 'Total dépensé', 'Visites'];
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _clients = generateMockClients();
     _searchController.addListener(() {
-      setState(() => _searchQuery = _searchController.text);
+      context.read<ClientsViewModel>().setSearch(_searchController.text);
     });
   }
 
@@ -38,40 +37,19 @@ class _ClientsScreenState extends State<ClientsScreen>
     super.dispose();
   }
 
-  List<Client> get _filteredClients {
-    var list = _clients.where((c) {
-      final q = _searchQuery.toLowerCase();
-      return c.name.toLowerCase().contains(q) ||
-          c.email.toLowerCase().contains(q) ||
-          c.phone.contains(q);
-    }).toList();
-
-    switch (_sortBy) {
-      case 'Dernière visite':
-        list.sort((a, b) => (b.lastVisit ?? DateTime(0))
-            .compareTo(a.lastVisit ?? DateTime(0)));
-        break;
-      case 'Total dépensé':
-        list.sort((a, b) => b.totalSpent.compareTo(a.totalSpent));
-        break;
-      case 'Visites':
-        list.sort((a, b) => b.totalVisits.compareTo(a.totalVisits));
-        break;
-      default:
-        list.sort((a, b) => a.name.compareTo(b.name));
-    }
-    return list;
-  }
+  ClientsViewModel get vm => context.watch<ClientsViewModel>();
 
   @override
   Widget build(BuildContext context) {
+    final vm = this.vm;
     return Scaffold(
       backgroundColor: Colors.white,
+      drawer: const ProDrawer(),
       body: NestedScrollView(
         headerSliverBuilder: (context, innerScrolled) => [
-          _buildAppBar(),
-          SliverToBoxAdapter(child: _buildSearchAndSort()),
-          SliverToBoxAdapter(child: _buildSummaryCards()),
+          _buildAppBar(vm),
+          SliverToBoxAdapter(child: _buildSearchAndSort(vm)),
+          SliverToBoxAdapter(child: _buildSummaryCards(vm)),
           SliverPersistentHeader(
             pinned: true,
             delegate: _TabBarDelegate(
@@ -97,16 +75,33 @@ class _ClientsScreenState extends State<ClientsScreen>
             ),
           ),
         ],
-        body: TabBarView(
-          controller: _tabController,
-          children: [
-            _buildClientList(),
-            _buildClientFiche(),
-          ],
-        ),
+        body: vm.loading
+            ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+            : vm.error != null
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(vm.error!, style: GoogleFonts.outfit(color: AppColors.cancelled)),
+                        const SizedBox(height: 12),
+                        ElevatedButton(
+                          onPressed: vm.load,
+                          style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                          child: Text('Réessayer', style: GoogleFonts.outfit(color: Colors.white)),
+                        ),
+                      ],
+                    ),
+                  )
+                : TabBarView(
+                    controller: _tabController,
+                    children: [
+                      _buildClientList(vm),
+                      _buildClientFiche(vm),
+                    ],
+                  ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showAddClientSheet,
+        onPressed: () => _showAddClientSheet(vm),
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -119,52 +114,54 @@ class _ClientsScreenState extends State<ClientsScreen>
     );
   }
 
-  SliverAppBar _buildAppBar() {
+  SliverAppBar _buildAppBar(ClientsViewModel vm) {
+    final auth = context.watch<AuthViewModel>();
     return SliverAppBar(
       backgroundColor: Colors.white,
       elevation: 0,
       pinned: false,
       floating: true,
       snap: true,
-      expandedHeight: 70,
-      flexibleSpace: FlexibleSpaceBar(
-        titlePadding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-        title: Row(
-          children: [
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Clients',
-                  style: GoogleFonts.outfit(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textDark,
-                  ),
-                ),
-                Text(
-                  '${_clients.length} clients enregistrés',
-                  style: GoogleFonts.outfit(
-                    fontSize: 11,
-                    color: AppColors.textGray,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-            const Spacer(),
-            IconButton(
-              icon: const Icon(Icons.tune_rounded, color: AppColors.textGray),
-              onPressed: () {},
-            ),
-          ],
+      leading: Builder(
+        builder: (ctx) => IconButton(
+          icon: const Icon(Icons.menu, color: AppColors.textDark),
+          onPressed: () => Scaffold.of(ctx).openDrawer(),
         ),
       ),
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Clients',
+            style: GoogleFonts.outfit(
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textDark,
+            ),
+          ),
+          Text(
+            auth.hasMultipleSalons
+                ? '${auth.salonFilterLabel} · ${vm.clients.length} clients'
+                : '${vm.clients.length} clients enregistrés',
+            style: GoogleFonts.outfit(
+              fontSize: 11,
+              color: AppColors.textGray,
+              fontWeight: FontWeight.w500,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.refresh_rounded, color: AppColors.textGray),
+          onPressed: vm.load,
+        ),
+      ],
     );
   }
 
-  Widget _buildSearchAndSort() {
+  Widget _buildSearchAndSort(ClientsViewModel vm) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       child: Row(
@@ -204,7 +201,7 @@ class _ClientsScreenState extends State<ClientsScreen>
             ),
             child: DropdownButtonHideUnderline(
               child: DropdownButton<String>(
-                value: _sortBy,
+                value: vm.sortBy,
                 icon: const Icon(Icons.swap_vert_rounded,
                     size: 18, color: AppColors.textGray),
                 style: GoogleFonts.outfit(
@@ -212,10 +209,10 @@ class _ClientsScreenState extends State<ClientsScreen>
                   fontWeight: FontWeight.w600,
                   color: AppColors.textDark,
                 ),
-                items: _sortOptions
+                items: vm.sortOptions
                     .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                     .toList(),
-                onChanged: (v) => setState(() => _sortBy = v!),
+                onChanged: (v) { if (v != null) vm.setSort(v); },
               ),
             ),
           ),
@@ -224,10 +221,10 @@ class _ClientsScreenState extends State<ClientsScreen>
     );
   }
 
-  Widget _buildSummaryCards() {
-    final totalRevenue = _clients.fold(0.0, (sum, c) => sum + c.totalSpent);
-    final totalVisits = _clients.fold(0, (sum, c) => sum + c.totalVisits);
-    final activeClients = _clients.where((c) =>
+  Widget _buildSummaryCards(ClientsViewModel vm) {
+    final totalRevenue = vm.clients.fold(0.0, (sum, c) => sum + c.totalSpent);
+    final totalVisits = vm.clients.fold(0, (sum, c) => sum + c.totalVisits);
+    final activeClients = vm.clients.where((c) =>
         c.lastVisit != null &&
         DateTime.now().difference(c.lastVisit!).inDays <= 30).length;
 
@@ -236,7 +233,7 @@ class _ClientsScreenState extends State<ClientsScreen>
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: Row(
         children: [
-          _buildSummaryCard('${_clients.length}', 'Total clients',
+          _buildSummaryCard('${vm.clients.length}', 'Total clients',
               Icons.people_alt_rounded, AppColors.primary, AppColors.primary.withOpacity(0.1)),
           const SizedBox(width: 10),
           _buildSummaryCard('$activeClients', 'Actifs (30j)',
@@ -291,8 +288,8 @@ class _ClientsScreenState extends State<ClientsScreen>
     );
   }
 
-  Widget _buildClientList() {
-    final clients = _filteredClients;
+  Widget _buildClientList(ClientsViewModel vm) {
+    final clients = vm.filteredClients;
     if (clients.isEmpty) {
       return Center(
         child: Column(
@@ -319,7 +316,7 @@ class _ClientsScreenState extends State<ClientsScreen>
     );
   }
 
-  Widget _buildClientFiche() {
+  Widget _buildClientFiche(ClientsViewModel vm) {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -354,19 +351,21 @@ class _ClientsScreenState extends State<ClientsScreen>
           ),
         ),
         const SizedBox(height: 16),
-        ..._filteredClients.take(5).map((c) => ClientCard(client: c)),
+        ...vm.filteredClients.take(5).map((c) => ClientCard(client: c)),
       ],
     );
   }
 
-  void _showAddClientSheet() {
+  void _showAddClientSheet(ClientsViewModel vm) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _AddClientSheet(
-        onAdd: (client) => setState(() => _clients.add(client)),
-        nextId: _clients.length + 1,
+      builder: (_) => ChangeNotifierProvider.value(
+        value: vm,
+        child: _AddClientSheet(
+          onAdd: (_) {},
+        ),
       ),
     );
   }
@@ -394,39 +393,70 @@ class _TabBarDelegate extends SliverPersistentHeaderDelegate {
 
 class _AddClientSheet extends StatefulWidget {
   final Function(Client) onAdd;
-  final int nextId;
-  const _AddClientSheet({required this.onAdd, required this.nextId});
+  const _AddClientSheet({required this.onAdd});
 
   @override
   State<_AddClientSheet> createState() => _AddClientSheetState();
 }
 
 class _AddClientSheetState extends State<_AddClientSheet> {
-  final _nameController = TextEditingController();
+  final _firstNameController = TextEditingController();
+  final _lastNameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
   final _addressController = TextEditingController();
+  bool _saving = false;
 
   @override
   void dispose() {
-    _nameController.dispose();
+    _firstNameController.dispose();
+    _lastNameController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
     _addressController.dispose();
     super.dispose();
   }
 
-  void _submit() {
-    if (_nameController.text.isEmpty || _phoneController.text.isEmpty) return;
-    final client = Client(
-      id: widget.nextId,
-      name: _nameController.text,
-      email: _emailController.text,
-      phone: _phoneController.text,
-      address: _addressController.text.isNotEmpty ? _addressController.text : null,
-    );
-    widget.onAdd(client);
-    Navigator.pop(context);
+  Future<void> _submit() async {
+    final first = _firstNameController.text.trim();
+    final last = _lastNameController.text.trim();
+    final phone = _phoneController.text.trim();
+    if (first.isEmpty || last.isEmpty || phone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Prénom, nom et téléphone requis',
+              style: GoogleFonts.outfit(fontSize: 13)),
+          backgroundColor: AppColors.cancelled,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      final vm = context.read<ClientsViewModel>();
+      final created = await vm.create(
+        firstName: first,
+        lastName: last,
+        phone: phone,
+        email: _emailController.text.trim().isNotEmpty
+            ? _emailController.text.trim()
+            : null,
+        address: _addressController.text.trim().isNotEmpty
+            ? _addressController.text.trim()
+            : null,
+      );
+      if (!mounted) return;
+      widget.onAdd(created);
+      Navigator.pop(context);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message, style: GoogleFonts.outfit(fontSize: 13))),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -469,7 +499,13 @@ class _AddClientSheetState extends State<_AddClientSheet> {
             ),
           ),
           const SizedBox(height: 20),
-          _field(_nameController, 'Nom complet *', 'Yasmine Benali'),
+          Row(
+            children: [
+              Expanded(child: _field(_firstNameController, 'Prénom *', 'Yasmine')),
+              const SizedBox(width: 12),
+              Expanded(child: _field(_lastNameController, 'Nom *', 'Benali')),
+            ],
+          ),
           const SizedBox(height: 12),
           _field(_phoneController, 'Téléphone *', '+212 6 61 23 45 67',
               type: TextInputType.phone),
@@ -483,7 +519,7 @@ class _AddClientSheetState extends State<_AddClientSheet> {
             width: double.infinity,
             height: 50,
             child: ElevatedButton(
-              onPressed: _submit,
+              onPressed: _saving ? null : _submit,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
@@ -492,10 +528,16 @@ class _AddClientSheetState extends State<_AddClientSheet> {
                   borderRadius: BorderRadius.circular(25),
                 ),
               ),
-              child: Text(
-                'Ajouter le client',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: 15),
-              ),
+              child: _saving
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : Text(
+                      'Ajouter le client',
+                      style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: 15),
+                    ),
             ),
           ),
         ],

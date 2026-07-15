@@ -1,115 +1,76 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import '../../constants/app_colors.dart';
+import '../../services/api_client.dart';
+import '../../viewmodels/auth_viewmodel.dart';
+import '../../viewmodels/caisse_viewmodel.dart';
+import '../../widgets/pro_drawer.dart';
 
-class CaisseScreen extends StatefulWidget {
+class CaisseScreen extends StatelessWidget {
   const CaisseScreen({super.key});
 
   @override
-  State<CaisseScreen> createState() => _CaisseScreenState();
-}
-
-class _CaisseScreenState extends State<CaisseScreen> {
-  int _selectedPeriod = 0; // 0=aujourd'hui, 1=semaine, 2=mois
-  final List<String> _periods = ['Aujourd\'hui', 'Cette semaine', 'Ce mois'];
-
-  final List<Map<String, dynamic>> _transactions = [
-    {
-      'id': 'TXN-001',
-      'client': 'Yasmine Benali',
-      'service': 'Coupe + Brushing',
-      'amount': 250.0,
-      'method': 'Carte',
-      'status': 'paid',
-      'time': '09:45',
-      'employee': 'Samira Bouzid',
-    },
-    {
-      'id': 'TXN-002',
-      'client': 'Khalid Amrani',
-      'service': 'Barbe + Coupe',
-      'amount': 120.0,
-      'method': 'Espèces',
-      'status': 'paid',
-      'time': '11:20',
-      'employee': 'Yassine El Fassi',
-    },
-    {
-      'id': 'TXN-003',
-      'client': 'Nadia Alaoui',
-      'service': 'Coloration',
-      'amount': 450.0,
-      'method': 'Carte',
-      'status': 'pending',
-      'time': '12:30',
-      'employee': 'Samira Bouzid',
-    },
-    {
-      'id': 'TXN-004',
-      'client': 'Omar Tazi',
-      'service': 'Soin du visage',
-      'amount': 180.0,
-      'method': 'Espèces',
-      'status': 'paid',
-      'time': '14:15',
-      'employee': 'Khalid Ait Lahcen',
-    },
-    {
-      'id': 'TXN-005',
-      'client': 'Fatima Zahra',
-      'service': 'Manucure',
-      'amount': 90.0,
-      'method': 'Virement',
-      'status': 'cancelled',
-      'time': '15:00',
-      'employee': 'Nadia El Khatib',
-    },
-    {
-      'id': 'TXN-006',
-      'client': 'Hicham Berrada',
-      'service': 'Massage relaxant',
-      'amount': 320.0,
-      'method': 'Carte',
-      'status': 'paid',
-      'time': '16:30',
-      'employee': 'Khalid Ait Lahcen',
-    },
-  ];
-
-  double get _totalRevenue => _transactions
-      .where((t) => t['status'] == 'paid')
-      .fold(0.0, (sum, t) => sum + (t['amount'] as double));
-
-  double get _pendingRevenue => _transactions
-      .where((t) => t['status'] == 'pending')
-      .fold(0.0, (sum, t) => sum + (t['amount'] as double));
-
-  int get _paidCount =>
-      _transactions.where((t) => t['status'] == 'paid').length;
-
-  @override
   Widget build(BuildContext context) {
+    final vm = context.watch<CaisseViewModel>();
+
     return Scaffold(
       backgroundColor: Colors.white,
-      body: CustomScrollView(
-        slivers: [
-          _buildAppBar(),
-          SliverToBoxAdapter(child: _buildPeriodSelector()),
-          SliverToBoxAdapter(child: _buildRevenueCard()),
-          SliverToBoxAdapter(child: _buildPaymentBreakdown()),
-          SliverToBoxAdapter(child: _buildTransactionsHeader()),
-          SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (ctx, i) => _buildTransactionItem(_transactions[i]),
-              childCount: _transactions.length,
-            ),
-          ),
-          const SliverPadding(padding: EdgeInsets.only(bottom: 100)),
-        ],
-      ),
+      drawer: const ProDrawer(),
+      body: vm.loading
+          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+          : vm.error != null
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(vm.error!,
+                          style: GoogleFonts.outfit(color: AppColors.cancelled)),
+                      const SizedBox(height: 12),
+                      ElevatedButton(
+                        onPressed: vm.load,
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary),
+                        child: Text('RÃ©essayer',
+                            style: GoogleFonts.outfit(color: Colors.white)),
+                      ),
+                    ],
+                  ),
+                )
+              : CustomScrollView(
+                  slivers: [
+                    _buildAppBar(context, vm),
+                    SliverToBoxAdapter(child: _PeriodSelector(vm: vm)),
+                    SliverToBoxAdapter(child: _RevenueCard(vm: vm)),
+                    SliverToBoxAdapter(child: _PaymentBreakdown(vm: vm)),
+                    SliverToBoxAdapter(child: _TransactionsHeader(vm: vm)),
+                    if (vm.transactions.isEmpty)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.all(32),
+                          child: Center(
+                            child: Text(
+                              'Aucune transaction sur cette pÃ©riode',
+                              style:
+                                  GoogleFonts.outfit(color: AppColors.textGray),
+                            ),
+                          ),
+                        ),
+                      )
+                    else
+                      SliverList(
+                        delegate: SliverChildBuilderDelegate(
+                          (ctx, i) =>
+                              _TransactionItem(txn: vm.transactions[i]),
+                          childCount: vm.transactions.length,
+                        ),
+                      ),
+                    const SliverPadding(padding: EdgeInsets.only(bottom: 100)),
+                  ],
+                ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showNewTransactionSheet(),
+        onPressed: () => _showNewSaleSheet(context),
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -122,67 +83,99 @@ class _CaisseScreenState extends State<CaisseScreen> {
     );
   }
 
-  SliverAppBar _buildAppBar() {
+  SliverAppBar _buildAppBar(BuildContext context, CaisseViewModel vm) {
+    final auth = context.watch<AuthViewModel>();
     return SliverAppBar(
       backgroundColor: Colors.white,
       elevation: 0,
       pinned: false,
       floating: true,
       snap: true,
-      expandedHeight: 70,
-      flexibleSpace: FlexibleSpaceBar(
-        titlePadding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-        title: Row(
-          children: [
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Caisse',
-                      style: GoogleFonts.outfit(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.textDark)),
-                  Text(
-                    DateFormat('d MMMM yyyy', 'fr_FR').format(DateTime.now()),
-                    style: GoogleFonts.outfit(
-                        fontSize: 11, color: AppColors.textGray, fontWeight: FontWeight.w500),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: AppColors.confirmedBg,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.circle, color: AppColors.confirmed, size: 8),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Ouvert',
-                    style: GoogleFonts.outfit(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.confirmed,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+      leading: Builder(
+        builder: (ctx) => IconButton(
+          icon: const Icon(Icons.menu, color: AppColors.textDark),
+          onPressed: () => Scaffold.of(ctx).openDrawer(),
         ),
       ),
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Caisse',
+            style: GoogleFonts.outfit(
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              color: AppColors.textDark,
+            ),
+          ),
+          if (auth.hasMultipleSalons)
+            Text(
+              auth.salonFilterLabel,
+              style: GoogleFonts.outfit(
+                fontSize: 11,
+                color: AppColors.textGray,
+                fontWeight: FontWeight.w500,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+        ],
+      ),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.refresh_rounded, color: AppColors.textGray),
+          onPressed: vm.load,
+        ),
+        Padding(
+          padding: const EdgeInsets.only(right: 12),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: AppColors.confirmedBg,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.circle, color: AppColors.confirmed, size: 8),
+                const SizedBox(width: 6),
+                Text(
+                  'Ouvert',
+                  style: GoogleFonts.outfit(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.confirmed,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
-  Widget _buildPeriodSelector() {
+  Future<void> _showNewSaleSheet(BuildContext context) async {
+    final vm = context.read<CaisseViewModel>();
+    await vm.loadSaleOptions();
+    if (!context.mounted) return;
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => ChangeNotifierProvider.value(
+        value: vm,
+        child: const _NewSaleSheet(),
+      ),
+    );
+  }
+}
+
+class _PeriodSelector extends StatelessWidget {
+  final CaisseViewModel vm;
+  const _PeriodSelector({required this.vm});
+
+  @override
+  Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
       child: Container(
@@ -192,11 +185,11 @@ class _CaisseScreenState extends State<CaisseScreen> {
           border: Border.all(color: AppColors.border),
         ),
         child: Row(
-          children: List.generate(_periods.length, (i) {
-            final selected = i == _selectedPeriod;
+          children: List.generate(vm.periods.length, (i) {
+            final selected = i == vm.selectedPeriod;
             return Expanded(
               child: GestureDetector(
-                onTap: () => setState(() => _selectedPeriod = i),
+                onTap: () => vm.setPeriod(i),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
                   margin: const EdgeInsets.all(4),
@@ -206,7 +199,7 @@ class _CaisseScreenState extends State<CaisseScreen> {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
-                    _periods[i],
+                    vm.periods[i],
                     textAlign: TextAlign.center,
                     style: GoogleFonts.outfit(
                       fontSize: 12,
@@ -222,12 +215,14 @@ class _CaisseScreenState extends State<CaisseScreen> {
       ),
     );
   }
+}
 
-  Widget _buildRevenueCard() {
-    final multiplier = _selectedPeriod == 0 ? 1.0 : _selectedPeriod == 1 ? 6.5 : 28.0;
-    final revenue = _totalRevenue * multiplier;
-    final pending = _pendingRevenue;
+class _RevenueCard extends StatelessWidget {
+  final CaisseViewModel vm;
+  const _RevenueCard({required this.vm});
 
+  @override
+  Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       padding: const EdgeInsets.all(24),
@@ -259,46 +254,29 @@ class _CaisseScreenState extends State<CaisseScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            '${revenue.toStringAsFixed(0)} DH',
+            '${vm.totalRevenue.toStringAsFixed(0)} DH',
             style: GoogleFonts.outfit(
               fontSize: 38,
               fontWeight: FontWeight.w800,
               color: Colors.white,
             ),
           ),
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              const Icon(Icons.trending_up_rounded, color: Colors.white70, size: 16),
-              const SizedBox(width: 4),
-              Text(
-                '+12.4% vs période précédente',
-                style: GoogleFonts.outfit(
-                  fontSize: 12,
-                  color: Colors.white70,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
           const SizedBox(height: 20),
           Row(
             children: [
               Expanded(
-                child: _buildRevenueSubCard(
-                  '$_paidCount transactions',
-                  'Encaissées',
+                child: _sub(
+                  '${vm.paidCount} transactions',
+                  'EncaissÃ©es',
                   Icons.check_circle_outline_rounded,
-                  Colors.white,
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _buildRevenueSubCard(
-                  '${pending.toStringAsFixed(0)} DH',
+                child: _sub(
+                  '${vm.pendingRevenue.toStringAsFixed(0)} DH',
                   'En attente',
                   Icons.pending_outlined,
-                  Colors.white70,
                 ),
               ),
             ],
@@ -308,8 +286,7 @@ class _CaisseScreenState extends State<CaisseScreen> {
     );
   }
 
-  Widget _buildRevenueSubCard(
-      String value, String label, IconData icon, Color color) {
+  Widget _sub(String value, String label, IconData icon) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -319,43 +296,56 @@ class _CaisseScreenState extends State<CaisseScreen> {
       ),
       child: Row(
         children: [
-          Icon(icon, color: color, size: 20),
+          Icon(icon, color: Colors.white, size: 20),
           const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                value,
-                style: GoogleFonts.outfit(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white,
-                ),
-              ),
-              Text(
-                label,
-                style: GoogleFonts.outfit(
-                  fontSize: 10,
-                  color: Colors.white70,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(value,
+                    style: GoogleFonts.outfit(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white),
+                    overflow: TextOverflow.ellipsis),
+                Text(label,
+                    style: GoogleFonts.outfit(
+                        fontSize: 10,
+                        color: Colors.white70,
+                        fontWeight: FontWeight.w600)),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildPaymentBreakdown() {
+class _PaymentBreakdown extends StatelessWidget {
+  final CaisseViewModel vm;
+  const _PaymentBreakdown({required this.vm});
+
+  @override
+  Widget build(BuildContext context) {
     final methods = <String, double>{};
-    for (final t in _transactions.where((t) => t['status'] == 'paid')) {
+    for (final t in vm.transactions.where((t) => t['status'] == 'paid')) {
       final m = t['method'] as String;
       methods[m] = (methods[m] ?? 0) + (t['amount'] as double);
     }
     final total = methods.values.fold(0.0, (a, b) => a + b);
-    final colors = [AppColors.primary, const Color(0xFF3B82F6), const Color(0xFF8B5CF6)];
-    final icons = [Icons.credit_card_rounded, Icons.payments_rounded, Icons.account_balance_rounded];
+    final colors = [
+      AppColors.primary,
+      const Color(0xFF3B82F6),
+      const Color(0xFF8B5CF6)
+    ];
+    final icons = [
+      Icons.credit_card_rounded,
+      Icons.payments_rounded,
+      Icons.account_balance_rounded
+    ];
+
+    if (methods.isEmpty) return const SizedBox.shrink();
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -438,8 +428,14 @@ class _CaisseScreenState extends State<CaisseScreen> {
       ),
     );
   }
+}
 
-  Widget _buildTransactionsHeader() {
+class _TransactionsHeader extends StatelessWidget {
+  final CaisseViewModel vm;
+  const _TransactionsHeader({required this.vm});
+
+  @override
+  Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
       child: Row(
@@ -454,7 +450,7 @@ class _CaisseScreenState extends State<CaisseScreen> {
             ),
           ),
           Text(
-            '${_transactions.length} opérations',
+            '${vm.transactions.length} opÃ©rations',
             style: GoogleFonts.outfit(
               fontSize: 12,
               color: AppColors.textGray,
@@ -465,8 +461,14 @@ class _CaisseScreenState extends State<CaisseScreen> {
       ),
     );
   }
+}
 
-  Widget _buildTransactionItem(Map<String, dynamic> txn) {
+class _TransactionItem extends StatelessWidget {
+  final Map<String, dynamic> txn;
+  const _TransactionItem({required this.txn});
+
+  @override
+  Widget build(BuildContext context) {
     final isPaid = txn['status'] == 'paid';
     final isPending = txn['status'] == 'pending';
     final Color statusColor = isPaid
@@ -479,11 +481,8 @@ class _CaisseScreenState extends State<CaisseScreen> {
         : isPending
             ? AppColors.pendingBg
             : AppColors.cancelledBg;
-    final String statusLabel = isPaid
-        ? 'Payé'
-        : isPending
-            ? 'En attente'
-            : 'Annulé';
+    final String statusLabel =
+        isPaid ? 'PayÃ©' : isPending ? 'En attente' : 'AnnulÃ©';
 
     final methodIcon = txn['method'] == 'Carte'
         ? Icons.credit_card_rounded
@@ -518,12 +517,15 @@ class _CaisseScreenState extends State<CaisseScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      txn['client'],
-                      style: GoogleFonts.outfit(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textDark,
+                    Expanded(
+                      child: Text(
+                        txn['client'],
+                        style: GoogleFonts.outfit(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textDark,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     Text(
@@ -531,7 +533,8 @@ class _CaisseScreenState extends State<CaisseScreen> {
                       style: GoogleFonts.outfit(
                         fontSize: 15,
                         fontWeight: FontWeight.w800,
-                        color: isPaid ? AppColors.confirmed : AppColors.textDark,
+                        color:
+                            isPaid ? AppColors.confirmed : AppColors.textDark,
                       ),
                     ),
                   ],
@@ -540,11 +543,14 @@ class _CaisseScreenState extends State<CaisseScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      txn['service'],
-                      style: GoogleFonts.outfit(
-                        fontSize: 12,
-                        color: AppColors.textGray,
+                    Expanded(
+                      child: Text(
+                        txn['service'],
+                        style: GoogleFonts.outfit(
+                          fontSize: 12,
+                          color: AppColors.textGray,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     Container(
@@ -566,12 +572,16 @@ class _CaisseScreenState extends State<CaisseScreen> {
                   ],
                 ),
                 const SizedBox(height: 4),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 6,
+                Row(
                   children: [
-                    _iconTextRow(Icons.access_time_rounded, txn['time']),
-                    _iconTextRow(Icons.person_outline_rounded, txn['employee']),
+                    const Icon(Icons.access_time_rounded,
+                        size: 12, color: AppColors.textLight),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${txn['time']}',
+                      style: GoogleFonts.outfit(
+                          fontSize: 11, color: AppColors.textLight),
+                    ),
                   ],
                 ),
               ],
@@ -581,30 +591,271 @@ class _CaisseScreenState extends State<CaisseScreen> {
       ),
     );
   }
+}
 
-  void _showNewTransactionSheet() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Fonctionnalité disponible dans la prochaine version',
-          style: GoogleFonts.outfit(fontSize: 13),
-        ),
-        backgroundColor: AppColors.primary,
-      ),
-    );
+class _NewSaleSheet extends StatefulWidget {
+  const _NewSaleSheet();
+
+  @override
+  State<_NewSaleSheet> createState() => _NewSaleSheetState();
+}
+
+class _NewSaleSheetState extends State<_NewSaleSheet> {
+  String? _clientId;
+  final Set<String> _serviceIds = {};
+  String _paymentMethod = 'CASH';
+  final _amountCtrl = TextEditingController();
+  final _notesCtrl = TextEditingController();
+  bool _amountOverridden = false;
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    _amountCtrl.dispose();
+    _notesCtrl.dispose();
+    super.dispose();
   }
 
-  Widget _iconTextRow(IconData icon, String text) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 12, color: AppColors.textLight),
-        const SizedBox(width: 4),
-        Text(
-          text,
-          style: GoogleFonts.outfit(fontSize: 11, color: AppColors.textLight),
+  void _recalcAmount(CaisseViewModel vm) {
+    if (_amountOverridden) return;
+    final sum = _serviceIds.fold<double>(0, (acc, id) {
+      final s = vm.catalogServices.firstWhere(
+        (x) => x['id']?.toString() == id,
+        orElse: () => <String, dynamic>{},
+      );
+      return acc + vm.servicePrice(s);
+    });
+    _amountCtrl.text = sum > 0 ? sum.toStringAsFixed(0) : '';
+  }
+
+  Future<void> _submit() async {
+    final vm = context.read<CaisseViewModel>();
+    final auth = context.read<AuthViewModel>();
+    setState(() => _submitting = true);
+    try {
+      final amount = double.tryParse(_amountCtrl.text.replaceAll(',', '.'));
+      await vm.createSale(
+        clientId: _clientId ?? '',
+        serviceIds: _serviceIds.toList(),
+        paymentMethod: _paymentMethod,
+        amountOverride: _amountOverridden ? amount : null,
+        notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+        tenantId: auth.activeTenantId,
+      );
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content:
+              Text('Vente encaissÃ©e', style: GoogleFonts.outfit(fontSize: 13)),
+          backgroundColor: AppColors.primary,
         ),
-      ],
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message, style: GoogleFonts.outfit())),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('Erreur lors de l\'encaissement',
+                style: GoogleFonts.outfit())),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final vm = context.watch<CaisseViewModel>();
+    final bottom = MediaQuery.of(context).viewInsets.bottom;
+
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.9,
+      ),
+      margin: EdgeInsets.only(bottom: bottom),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text('Nouvelle vente',
+              style: GoogleFonts.outfit(
+                  fontSize: 20, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 4),
+          Text(
+            DateFormat('d MMMM yyyy', 'fr_FR').format(DateTime.now()),
+            style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textGray),
+          ),
+          const SizedBox(height: 16),
+          Flexible(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text('Client *',
+                      style: GoogleFonts.outfit(
+                          fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    value: _clientId,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      hintText: 'SÃ©lectionner un client',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                    ),
+                    items: vm.clients.map((c) {
+                      final id = c['id']?.toString() ?? '';
+                      final name =
+                          '${c['firstName'] ?? ''} ${c['lastName'] ?? ''}'
+                              .trim();
+                      return DropdownMenuItem(
+                        value: id,
+                        child: Text(name.isEmpty ? 'Client' : name,
+                            overflow: TextOverflow.ellipsis),
+                      );
+                    }).toList(),
+                    onChanged: _submitting
+                        ? null
+                        : (v) => setState(() => _clientId = v),
+                  ),
+                  const SizedBox(height: 16),
+                  Text('Services *',
+                      style: GoogleFonts.outfit(
+                          fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  if (vm.catalogServices.isEmpty)
+                    Text('Aucune prestation',
+                        style: GoogleFonts.outfit(color: AppColors.textGray))
+                  else
+                    ...vm.catalogServices.map((s) {
+                      final id = s['id']?.toString() ?? '';
+                      final name = s['name']?.toString() ?? 'Service';
+                      final price = vm.servicePrice(s);
+                      final selected = _serviceIds.contains(id);
+                      return CheckboxListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        value: selected,
+                        title: Text(name, style: GoogleFonts.outfit(fontSize: 14)),
+                        subtitle: Text('${price.toStringAsFixed(0)} DH',
+                            style: GoogleFonts.outfit(
+                                fontSize: 12, color: AppColors.textGray)),
+                        onChanged: _submitting
+                            ? null
+                            : (v) {
+                                setState(() {
+                                  if (v == true) {
+                                    _serviceIds.add(id);
+                                  } else {
+                                    _serviceIds.remove(id);
+                                  }
+                                  _recalcAmount(vm);
+                                });
+                              },
+                      );
+                    }),
+                  const SizedBox(height: 12),
+                  Text('Montant (DH)',
+                      style: GoogleFonts.outfit(
+                          fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _amountCtrl,
+                    keyboardType: TextInputType.number,
+                    enabled: !_submitting,
+                    onChanged: (_) =>
+                        setState(() => _amountOverridden = true),
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text('Mode de paiement',
+                      style: GoogleFonts.outfit(
+                          fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    value: _paymentMethod,
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                    ),
+                    items: CaisseViewModel.paymentMethodLabels.entries
+                        .map((e) => DropdownMenuItem(
+                            value: e.key, child: Text(e.value)))
+                        .toList(),
+                    onChanged: _submitting
+                        ? null
+                        : (v) {
+                            if (v != null) {
+                              setState(() => _paymentMethod = v);
+                            }
+                          },
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _notesCtrl,
+                    enabled: !_submitting,
+                    decoration: InputDecoration(
+                      labelText: 'Note (optionnel)',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: _submitting ? null : _submit,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24)),
+            ),
+            child: Text(
+              _submitting ? 'Encaissementâ€¦' : 'Encaisser',
+              style: GoogleFonts.outfit(fontWeight: FontWeight.w700),
+            ),
+          ),
+          TextButton(
+            onPressed: _submitting ? null : () => Navigator.pop(context),
+            child: Text('Annuler',
+                style: GoogleFonts.outfit(color: AppColors.textGray)),
+          ),
+        ],
+      ),
     );
   }
 }

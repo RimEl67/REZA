@@ -3,25 +3,39 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../constants.dart';
 import '../models/family_member.dart';
-import '../providers/auth_provider.dart';
+import '../viewmodels/auth_viewmodel.dart';
+import '../viewmodels/proches_viewmodel.dart';
 import '../services/account_service.dart';
 import '../services/api_client.dart';
 import '../services/booking_for_proche.dart';
 import 'login_screen.dart';
 
-class ProchesScreen extends StatefulWidget {
+class ProchesScreen extends StatelessWidget {
   final VoidCallback? onExplore;
 
   const ProchesScreen({super.key, this.onExplore});
 
   @override
-  State<ProchesScreen> createState() => _ProchesScreenState();
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (_) => ProchesViewModel(),
+      child: _ProchesBody(onExplore: onExplore),
+    );
+  }
 }
 
-class _ProchesScreenState extends State<ProchesScreen> {
-  List<FamilyMember> _members = [];
-  bool _loading = false;
-  String? _error;
+class _ProchesBody extends StatefulWidget {
+  final VoidCallback? onExplore;
+  const _ProchesBody({this.onExplore});
+  @override
+  State<_ProchesBody> createState() => _ProchesScreenState();
+}
+
+class _ProchesScreenState extends State<_ProchesBody> {
+  ProchesViewModel get _pvm => context.watch<ProchesViewModel>();
+  List<FamilyMember> get _members => _pvm.members;
+  bool get _loading => _pvm.loading;
+  String? get _error => _pvm.error;
 
   @override
   void initState() {
@@ -30,39 +44,8 @@ class _ProchesScreenState extends State<ProchesScreen> {
   }
 
   Future<void> _load() async {
-    final auth = context.read<AuthProvider>();
-    if (!auth.isAuthenticated || auth.email == null) {
-      setState(() {
-        _members = [];
-        _loading = false;
-        _error = null;
-      });
-      return;
-    }
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final list = await accountService.getFamilyMembers(auth.email!);
-      if (!mounted) return;
-      setState(() {
-        _members = list;
-        _loading = false;
-      });
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.message;
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
-    }
+    final auth = context.read<AuthViewModel>();
+    await context.read<ProchesViewModel>().load(auth.email);
   }
 
   Future<void> _bookFor(FamilyMember m) async {
@@ -82,7 +65,7 @@ class _ProchesScreenState extends State<ProchesScreen> {
   }
 
   Future<void> _delete(FamilyMember m) async {
-    final auth = context.read<AuthProvider>();
+    final auth = context.read<AuthViewModel>();
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -111,7 +94,7 @@ class _ProchesScreenState extends State<ProchesScreen> {
   }
 
   Future<void> _showForm({FamilyMember? existing}) async {
-    final auth = context.read<AuthProvider>();
+    final auth = context.read<AuthViewModel>();
     if (auth.email == null) return;
 
     final firstCtrl = TextEditingController(text: existing?.firstName ?? '');
@@ -266,7 +249,7 @@ class _ProchesScreenState extends State<ProchesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
+    final auth = context.watch<AuthViewModel>();
 
     if (!auth.isAuthenticated || auth.email == null) {
       return Scaffold(

@@ -5,7 +5,7 @@ import 'package:latlong2/latlong.dart' hide Path;
 import 'package:provider/provider.dart';
 import '../constants.dart';
 import '../models/venue_mapper.dart';
-import '../providers/auth_provider.dart';
+import '../viewmodels/auth_viewmodel.dart';
 import '../services/account_service.dart';
 import '../services/api_client.dart';
 import '../services/discovery_service.dart';
@@ -62,7 +62,7 @@ class _VenueDetailScreenState extends State<VenueDetailScreen> {
         discoveryService.getServices(widget.tenantId),
         discoveryService.getEmployees(widget.tenantId),
         discoveryService.getReviews(widget.tenantId),
-        discoveryService.searchTenants(city: 'Casablanca', limit: 8),
+        discoveryService.searchTenants(limit: 8),
       ]);
 
       final tenant = results[0] as Map<String, dynamic>;
@@ -77,7 +77,7 @@ class _VenueDetailScreenState extends State<VenueDetailScreen> {
       String? favId;
       bool liked = false;
       if (!mounted) return;
-      final auth = context.read<AuthProvider>();
+      final auth = context.read<AuthViewModel>();
       if (auth.isAuthenticated && auth.email != null) {
         try {
           final favs = await accountService.getFavorites(auth.email!);
@@ -122,7 +122,7 @@ class _VenueDetailScreenState extends State<VenueDetailScreen> {
   }
 
   Future<void> _toggleFavorite() async {
-    final auth = context.read<AuthProvider>();
+    final auth = context.read<AuthViewModel>();
     if (!auth.isAuthenticated || auth.email == null) {
       Navigator.push(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
       return;
@@ -701,7 +701,8 @@ class _AutresSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final list = nearby.isNotEmpty ? nearby : allVenues;
+    // Never fall back to mock allVenues — fake ids (1/2/…) hit API 404 on tap.
+    final list = nearby;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -742,52 +743,54 @@ class _AutresSection extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
           child: Text(venue.location, style: GoogleFonts.inter(fontSize: 13, color: AppColors.textDark, height: 1.5)),
         ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Text('Établissements à proximité', style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700)),
-        ),
-        const SizedBox(height: 14),
-        SizedBox(
-          height: 190,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
+        if (list.isNotEmpty) ...[
+          Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
-            itemCount: list.length,
-            itemBuilder: (context, index) {
-              final v = list[index];
-              return GestureDetector(
-                onTap: () => Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => VenueDetailScreen(tenantId: v.id)),
-                ),
-                child: Container(
-                  width: 160,
-                  margin: const EdgeInsets.only(right: 14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: Image.network(
-                          v.image,
-                          height: 110,
-                          width: 160,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(height: 110, color: AppColors.surface),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(v.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700)),
-                      Text(v.location, maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.inter(fontSize: 11, color: AppColors.textGray)),
-                    ],
-                  ),
-                ),
-              );
-            },
+            child: Text('Établissements à proximité', style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700)),
           ),
-        ),
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 190,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              itemCount: list.length,
+              itemBuilder: (context, index) {
+                final v = list[index];
+                return GestureDetector(
+                  onTap: () => Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(builder: (_) => VenueDetailScreen(tenantId: v.id)),
+                  ),
+                  child: Container(
+                    width: 160,
+                    margin: const EdgeInsets.only(right: 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: Image.network(
+                            v.image,
+                            height: 110,
+                            width: 160,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Container(height: 110, color: AppColors.surface),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(v.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700)),
+                        Text(v.location, maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.inter(fontSize: 11, color: AppColors.textGray)),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ],
     );
   }

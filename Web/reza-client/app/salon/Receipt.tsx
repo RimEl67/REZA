@@ -126,10 +126,10 @@ const Receipt: React.FC<ReceiptProps> = ({
       <div className="bg-[#8b7260] text-white py-6 px-6 text-center">
         <div className="flex items-center justify-center gap-3 mb-2">
           <CheckCircle className="w-6 h-6" />
-          <h2 className="text-2xl font-semibold">Réservation confirmée !</h2>
+          <h2 className="text-2xl font-semibold">Réservation enregistrée !</h2>
         </div>
         <p className="text-white/90 text-sm">
-          Votre réservation a été enregistrée avec succès.
+          Votre demande a été envoyée. L&apos;établissement confirmera bientôt votre rendez-vous.
           {bookingData.paymentMethod === 'card'
             ? ' Vous recevrez une confirmation par email.'
             : ' Paiement sur place à l\'arrivée.'}

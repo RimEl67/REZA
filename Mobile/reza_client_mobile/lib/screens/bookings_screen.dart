@@ -2,24 +2,37 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../constants.dart';
-import '../providers/auth_provider.dart';
-import '../services/account_service.dart';
+import '../viewmodels/auth_viewmodel.dart';
 import '../services/api_client.dart';
+import '../viewmodels/bookings_viewmodel.dart';
 import 'login_screen.dart';
 
-class BookingsScreen extends StatefulWidget {
+class BookingsScreen extends StatelessWidget {
   const BookingsScreen({super.key});
 
   @override
-  State<BookingsScreen> createState() => _BookingsScreenState();
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (_) => BookingsViewModel(),
+      child: const _BookingsBody(),
+    );
+  }
 }
 
-class _BookingsScreenState extends State<BookingsScreen> with SingleTickerProviderStateMixin {
+class _BookingsBody extends StatefulWidget {
+  const _BookingsBody();
+  @override
+  State<_BookingsBody> createState() => _BookingsScreenState();
+}
+
+class _BookingsScreenState extends State<_BookingsBody> with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  List<Map<String, dynamic>> _upcoming = [];
-  List<Map<String, dynamic>> _past = [];
-  bool _loading = false;
-  String? _error;
+
+  BookingsViewModel get _bvm => context.watch<BookingsViewModel>();
+  List<Map<String, dynamic>> get _upcoming => _bvm.upcoming;
+  List<Map<String, dynamic>> get _past => _bvm.past;
+  bool get _loading => _bvm.loading;
+  String? get _error => _bvm.error;
 
   @override
   void initState() {
@@ -35,95 +48,8 @@ class _BookingsScreenState extends State<BookingsScreen> with SingleTickerProvid
   }
 
   Future<void> _load() async {
-    final auth = context.read<AuthProvider>();
-    if (!auth.isAuthenticated || auth.email == null) {
-      setState(() {
-        _upcoming = [];
-        _past = [];
-        _loading = false;
-        _error = null;
-      });
-      return;
-    }
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final list = await accountService.getAppointments(auth.email!);
-      final now = DateTime.now();
-      final upcoming = <Map<String, dynamic>>[];
-      final past = <Map<String, dynamic>>[];
-      for (final a in list) {
-        final mapped = _mapAppointment(a);
-        final status = mapped['status'] as String;
-        final dt = mapped['_dt'] as DateTime?;
-        final isPast = status == 'completed' ||
-            status == 'cancelled' ||
-            status == 'no_show' ||
-            (dt != null && dt.isBefore(now));
-        if (isPast) {
-          past.add(mapped);
-        } else {
-          upcoming.add(mapped);
-        }
-      }
-      if (!mounted) return;
-      setState(() {
-        _upcoming = upcoming;
-        _past = past;
-        _loading = false;
-      });
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = e.message;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = e.toString();
-      });
-    }
-  }
-
-  Map<String, dynamic> _mapAppointment(Map<String, dynamic> a) {
-    final dateStr = a['date']?.toString() ?? '';
-    final timeStr = a['time']?.toString() ?? '';
-    DateTime? dt;
-    try {
-      if (dateStr.contains('-') && timeStr.contains(':')) {
-        final dp = dateStr.split('-');
-        final tp = timeStr.split(':');
-        dt = DateTime(
-          int.parse(dp[0]),
-          int.parse(dp[1]),
-          int.parse(dp[2]),
-          int.parse(tp[0]),
-          int.parse(tp[1]),
-        );
-      }
-    } catch (_) {}
-
-    final price = a['price'];
-    final priceLabel = price is num ? '${price.toInt()} MAD' : (price?.toString() ?? '');
-
-    return {
-      'id': a['id']?.toString() ?? '',
-      'venue': a['salon']?.toString() ?? a['venue']?.toString() ?? 'Salon',
-      'service': a['service']?.toString() ?? '',
-      'date': dateStr,
-      'time': timeStr,
-      'duration': a['duration']?.toString() ?? '',
-      'price': priceLabel,
-      'status': (a['status']?.toString() ?? 'pending').toLowerCase(),
-      'image': (a['image']?.toString().isNotEmpty == true)
-          ? a['image'].toString()
-          : 'https://images.unsplash.com/photo-1560066984-138dadb4c035?q=80&w=400',
-      '_dt': dt,
-    };
+    final auth = context.read<AuthViewModel>();
+    await context.read<BookingsViewModel>().load(auth.email);
   }
 
   Color _statusColor(String status) {
@@ -167,9 +93,14 @@ class _BookingsScreenState extends State<BookingsScreen> with SingleTickerProvid
     }
   }
 
+  bool _canCancel(String status) {
+    final s = status.toLowerCase();
+    return s == 'pending' || s == 'confirmed';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
+    final auth = context.watch<AuthViewModel>();
 
     if (!auth.isAuthenticated) {
       return Scaffold(
@@ -308,6 +239,13 @@ class _BookingsScreenState extends State<BookingsScreen> with SingleTickerProvid
                           ),
                           const SizedBox(height: 4),
                           Text(booking['service'] as String, style: GoogleFonts.inter(fontSize: 14, color: AppColors.textGray)),
+                          if (status == 'pending') ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              'En attente du salon',
+                              style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w500, color: const Color(0xFFB45309)),
+                            ),
+                          ],
                           const SizedBox(height: 8),
                           Text('${booking['date']} · ${booking['time']}', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textGray)),
                           const SizedBox(height: 4),
@@ -324,7 +262,7 @@ class _BookingsScreenState extends State<BookingsScreen> with SingleTickerProvid
                   ],
                 ),
               ),
-              if (isUpcoming && status != 'cancelled')
+              if (isUpcoming && _canCancel(status))
                 Container(
                   decoration: const BoxDecoration(border: Border(top: BorderSide(color: AppColors.border))),
                   child: TextButton(
@@ -358,11 +296,11 @@ class _BookingsScreenState extends State<BookingsScreen> with SingleTickerProvid
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
-              final email = context.read<AuthProvider>().email;
+              final email = context.read<AuthViewModel>().email;
               final id = booking['id'] as String?;
               if (email == null || id == null || id.isEmpty) return;
               try {
-                await accountService.cancelAppointment(id, email);
+                await context.read<BookingsViewModel>().cancel(id, email);
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Réservation annulée')),

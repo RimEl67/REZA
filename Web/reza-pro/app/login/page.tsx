@@ -114,6 +114,10 @@ function LoginPageContent() {
 
   // Get redirect URL from query parameter or default to dashboard
   const getRedirectUrl = () => {
+    // Global superadmins land on their own page
+    if (user?.role === 'SUPER_ADMIN') {
+      return '/superadmin';
+    }
     const redirect = searchParamsState?.get('redirect');
     if (redirect && redirect.startsWith('/')) {
       return redirect;

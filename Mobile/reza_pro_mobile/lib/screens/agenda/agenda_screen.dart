@@ -1,92 +1,261 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import 'package:table_calendar/table_calendar.dart';
 import '../../constants/app_colors.dart';
 import '../../models/appointment.dart';
-import '../../widgets/appointment_card.dart';
+import '../../services/api_client.dart';
+import '../../viewmodels/agenda_viewmodel.dart';
+import '../../viewmodels/new_appointment_viewmodel.dart';
+import '../../viewmodels/auth_viewmodel.dart';
 import '../../widgets/new_appointment_modal.dart';
+import '../../widgets/pro_drawer.dart';
 
-class AgendaScreen extends StatefulWidget {
-  const AgendaScreen({super.key});
+/// Timed block after classic calendar column-packing (overlap graph).
+class _PackedSlot {
+  _PackedSlot({
+    required this.appointment,
+    required this.startMin,
+    required this.endMin,
+    required this.top,
+    required this.height,
+  });
 
-  @override
-  State<AgendaScreen> createState() => _AgendaScreenState();
+  final Appointment appointment;
+  final double startMin;
+  final double endMin;
+  final double top;
+  final double height;
+  int column = 0;
+  int columnCount = 1;
 }
 
-class _AgendaScreenState extends State<AgendaScreen> {
-  DateTime _selectedDate = DateTime.now();
-  String _selectedEmployee = 'Tous';
-  String _selectedStatus = 'Tous';
-  late List<Appointment> _appointments;
+/// Pack overlapping intervals into side-by-side columns (Web day grid idea).
+List<_PackedSlot> _packDayAppointments(List<Appointment> apps) {
+  const dayStartHour = 8;
+  const daySpanMinutes = 11 * 60; // 08:00 → 19:00
+  const hourHeight = 70.0;
 
-  final List<String> _employees = [
-    'Tous',
-    'Yassine El Fassi',
-    'Samira Bouzid',
-    'Khalid Ait Lahcen',
-    'Nadia El Khatib',
-  ];
-
-  final List<String> _statuses = ['Tous', 'Confirmé', 'En attente', 'Annulé'];
-
-  @override
-  void initState() {
-    super.initState();
-    _appointments = generateMockAppointments();
+  final items = <_PackedSlot>[];
+  for (final app in apps) {
+    try {
+      final parts = app.time.split(':');
+      final hour = int.parse(parts[0]);
+      final minute = int.parse(parts[1]);
+      final startMin = ((hour - dayStartHour) * 60.0) + minute;
+      if (startMin < 0 || startMin > daySpanMinutes) continue;
+      final endMin = startMin + app.duration.toDouble();
+      items.add(
+        _PackedSlot(
+          appointment: app,
+          startMin: startMin,
+          endMin: endMin,
+          top: (startMin / 60.0) * hourHeight,
+          height: (app.duration / 60.0) * hourHeight,
+        ),
+      );
+    } catch (_) {
+      // skip malformed time
+    }
   }
 
-  List<Appointment> get _filteredAppointments {
-    final day = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
-    return _appointments.where((a) {
-      final aDay = DateTime(a.date.year, a.date.month, a.date.day);
-      if (aDay != day) return false;
-      if (_selectedEmployee != 'Tous' && a.employee != _selectedEmployee) return false;
-      if (_selectedStatus != 'Tous') {
-        final statusMap = {
-          'Confirmé': 'confirmed',
-          'En attente': 'pending',
-          'Annulé': 'cancelled',
-        };
-        if (a.status != statusMap[_selectedStatus]) return false;
+  items.sort((a, b) {
+    final byStart = a.startMin.compareTo(b.startMin);
+    if (byStart != 0) return byStart;
+    return b.endMin.compareTo(a.endMin); // longer first
+  });
+
+  // Greedy earliest-free column.
+  final columnEnds = <double>[];
+  for (final item in items) {
+    var placed = false;
+    for (var col = 0; col < columnEnds.length; col++) {
+      if (columnEnds[col] <= item.startMin) {
+        item.column = col;
+        columnEnds[col] = item.endMin;
+        placed = true;
+        break;
       }
-      return true;
-    }).toList();
+    }
+    if (!placed) {
+      item.column = columnEnds.length;
+      columnEnds.add(item.endMin);
+    }
   }
 
-  // Generate 7-day week strip starting from today - 3
-  List<DateTime> get _weekDays {
-    final anchor = DateTime.now().subtract(const Duration(days: 3));
-    return List.generate(7, (i) => anchor.add(Duration(days: i)));
+  // Cluster connected overlaps → columnCount = max cols in cluster.
+  final n = items.length;
+  if (n == 0) return items;
+  final parent = List<int>.generate(n, (i) => i);
+  int find(int i) {
+    while (parent[i] != i) {
+      parent[i] = parent[parent[i]];
+      i = parent[i];
+    }
+    return i;
+  }
+
+  void union(int a, int b) {
+    final ra = find(a);
+    final rb = find(b);
+    if (ra != rb) parent[rb] = ra;
+  }
+
+  for (var i = 0; i < n; i++) {
+    for (var j = i + 1; j < n; j++) {
+      if (items[j].startMin >= items[i].endMin) break;
+      union(i, j);
+    }
+  }
+
+  final clusterMaxCol = <int, int>{};
+  for (var i = 0; i < n; i++) {
+    final root = find(i);
+    clusterMaxCol[root] =
+        math.max(clusterMaxCol[root] ?? 0, items[i].column);
+  }
+  for (var i = 0; i < n; i++) {
+    items[i].columnCount = (clusterMaxCol[find(i)] ?? 0) + 1;
+  }
+
+  return items;
+}
+
+const _paymentMethods = <String, String>{
+  'CASH': 'Espèces',
+  'CARD': 'Carte',
+  'BANK_TRANSFER': 'Virement',
+  'CHECK': 'Chèque',
+};
+
+class AgendaScreen extends StatelessWidget {
+  const AgendaScreen({super.key});
+
+  Future<void> _openDatePicker(BuildContext context, AgendaViewModel vm) async {
+    await vm.ensureMonthLoaded(vm.selectedDate);
+    if (!context.mounted) return;
+    DateTime focused = vm.selectedDate;
+    DateTime selected = vm.selectedDate;
+
+    final picked = await showDialog<DateTime>(
+      context: context,
+      builder: (ctx) {
+        return ListenableBuilder(
+          listenable: vm,
+          builder: (ctx, _) {
+            return StatefulBuilder(
+              builder: (ctx, setLocal) {
+                final markers = vm.daysWithAppointments;
+                return AlertDialog(
+                  title: Text(
+                    'Sélectionner une date',
+                    style: GoogleFonts.outfit(fontWeight: FontWeight.w700),
+                  ),
+                  contentPadding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                  content: SizedBox(
+                    width: 340,
+                    child: TableCalendar(
+                      locale: 'fr_FR',
+                      firstDay:
+                          DateTime.now().subtract(const Duration(days: 365)),
+                      lastDay: DateTime.now().add(const Duration(days: 365)),
+                      focusedDay: focused,
+                      selectedDayPredicate: (d) => isSameDay(d, selected),
+                      calendarFormat: CalendarFormat.month,
+                      startingDayOfWeek: StartingDayOfWeek.monday,
+                      availableCalendarFormats: const {
+                        CalendarFormat.month: 'Mois',
+                      },
+                      headerStyle: HeaderStyle(
+                        titleCentered: true,
+                        formatButtonVisible: false,
+                        titleTextStyle: GoogleFonts.outfit(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                        ),
+                      ),
+                      calendarStyle: CalendarStyle(
+                        todayDecoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.25),
+                          shape: BoxShape.circle,
+                        ),
+                        selectedDecoration: const BoxDecoration(
+                          color: Color(0xFF4ADE80),
+                          shape: BoxShape.circle,
+                        ),
+                        markerDecoration: const BoxDecoration(
+                          color: AppColors.navy,
+                          shape: BoxShape.circle,
+                        ),
+                        markersMaxCount: 1,
+                        markerSize: 5,
+                        markerMargin: const EdgeInsets.only(top: 6),
+                      ),
+                      eventLoader: (day) {
+                        final key = DateTime(day.year, day.month, day.day);
+                        return markers.contains(key) ? [key] : const [];
+                      },
+                      onDaySelected: (day, focusedDay) {
+                        selected = day;
+                        focused = focusedDay;
+                        setLocal(() {});
+                      },
+                      onPageChanged: (focusedDay) async {
+                        focused = focusedDay;
+                        await vm.ensureMonthLoaded(focusedDay);
+                        setLocal(() {});
+                      },
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: Text('Annuler', style: GoogleFonts.outfit()),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, selected),
+                      child: Text(
+                        'OK',
+                        style: GoogleFonts.outfit(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+
+    if (picked != null) await vm.setDate(picked);
   }
 
   @override
   Widget build(BuildContext context) {
+    final vm = context.watch<AgendaViewModel>();
+    final auth = context.watch<AuthViewModel>();
+
     return Scaffold(
       backgroundColor: Colors.white,
+      drawer: const ProDrawer(),
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.menu),
-          onPressed: () {},
+        leading: Builder(
+          builder: (ctx) => IconButton(
+            icon: const Icon(Icons.menu),
+            onPressed: () => Scaffold.of(ctx).openDrawer(),
+          ),
         ),
         title: InkWell(
-          onTap: () async {
-            final picked = await showDatePicker(
-              context: context,
-              initialDate: _selectedDate,
-              firstDate: DateTime.now().subtract(const Duration(days: 365)),
-              lastDate: DateTime.now().add(const Duration(days: 365)),
-            );
-            if (picked != null) {
-              setState(() {
-                _selectedDate = picked;
-              });
-            }
-          },
+          onTap: () => _openDatePicker(context, vm),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                DateFormat('E d MMM', 'fr_FR').format(_selectedDate),
+                DateFormat('E d MMM', 'fr_FR').format(vm.selectedDate),
                 style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16),
               ),
               const Icon(Icons.keyboard_arrow_down, size: 18),
@@ -95,8 +264,13 @@ class _AgendaScreenState extends State<AgendaScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.calendar_view_day_outlined),
-            onPressed: () {},
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: () async {
+              await Future.wait([
+                vm.loadAppointments(),
+                vm.loadMonthAppointments(forMonth: vm.selectedDate, force: true),
+              ]);
+            },
           ),
         ],
         centerTitle: true,
@@ -105,227 +279,141 @@ class _AgendaScreenState extends State<AgendaScreen> {
       ),
       body: Column(
         children: [
-          // Subheader showing current collaborator
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: const BoxDecoration(
               color: Color(0xFFFAFAFA),
               border: Border(bottom: BorderSide(color: Color(0xFFEEEEEE))),
             ),
-            child: Center(
-              child: Text(
-                _selectedEmployee == 'Tous' ? 'Tous les collaborateurs' : _selectedEmployee,
-                style: GoogleFonts.outfit(
-                  color: Colors.grey[700],
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
+            child: Column(
+              children: [
+                if (auth.hasMultipleSalons)
+                  Text(
+                    auth.salonFilterLabel,
+                    style: GoogleFonts.outfit(
+                      color: AppColors.textLight,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                if (auth.hasMultipleSalons) const SizedBox(height: 2),
+                Text(
+                  vm.selectedEmployeeId.isEmpty
+                      ? 'Tous les collaborateurs'
+                      : vm.selectedEmployeeLabel,
+                  style: GoogleFonts.outfit(
+                    color: Colors.grey[600],
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
+              ],
             ),
           ),
-          // Filter Row
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
               children: [
-                Expanded(
-                  child: _buildDropdown(
-                    value: _selectedEmployee,
-                    items: _employees,
-                    icon: Icons.person_outline,
-                    onChanged: (v) => setState(() => _selectedEmployee = v!),
-                  ),
-                ),
+                Expanded(child: _EmployeeDropdown(vm: vm)),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: _buildDropdown(
-                    value: _selectedStatus,
-                    items: _statuses,
-                    icon: Icons.filter_list,
-                    onChanged: (v) => setState(() => _selectedStatus = v!),
+                  child: _SimpleDropdown(
+                    value: vm.selectedStatus,
+                    items: vm.statuses,
+                    onChanged: (v) {
+                      if (v != null) vm.setStatus(v);
+                    },
                   ),
                 ),
               ],
             ),
           ),
-          // Hour list + Timeline blocks
-          Expanded(
-            child: SingleChildScrollView(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(8, 16, 16, 80),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Hour Indicator column (08:00 to 18:00)
-                    Column(
-                      children: List.generate(11, (index) {
-                        final hour = 8 + index;
-                        return Container(
-                          height: 70,
-                          alignment: Alignment.topCenter,
-                          padding: const EdgeInsets.only(right: 8),
-                          child: Text(
-                            '${hour.toString().padLeft(2, '0')}:00',
-                            style: GoogleFonts.outfit(
-                              fontSize: 12,
-                              color: Colors.grey[500],
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        );
-                      }),
-                    ),
-                    // Vertical divider line
-                    Container(
-                      width: 1,
-                      height: 770,
-                      color: Colors.grey[200],
-                    ),
-                    const SizedBox(width: 8),
-                    // Timeline block space
-                    Expanded(
-                      child: Container(
-                        height: 770,
-                        child: Stack(
-                          children: [
-                            // Hour grid lines
-                            ...List.generate(11, (index) {
-                              return Positioned(
-                                top: index * 70.0,
-                                left: 0,
-                                right: 0,
-                                child: Container(
-                                  height: 1,
-                                  color: Colors.grey[100],
-                                ),
-                              );
-                            }),
-                            // Appointments positioned inside the stack
-                            ..._filteredAppointments.map((app) {
-                              // Parse start time "09:00" to position
-                              try {
-                                final parts = app.time.split(':');
-                                final hour = int.parse(parts[0]);
-                                final minute = int.parse(parts[1]);
-                                
-                                // Calculate top offset based on 08:00 anchor
-                                final double startMinutes = ((hour - 8) * 60.0) + minute;
-                                if (startMinutes < 0 || startMinutes > 600) {
-                                  return const SizedBox.shrink(); // Out of 8am to 6pm bounds
-                                }
-                                
-                                final double top = (startMinutes / 60.0) * 70.0;
-                                final double height = (app.duration / 60.0) * 70.0;
-                                
-                                // Background colors for timeline styling
-                                Color blockColor = const Color(0xFF60A5FA);
-                                if (app.service.contains('Coupe')) {
-                                  blockColor = const Color(0xFF8B5CF6);
-                                } else if (app.service.contains('Coloration')) {
-                                  blockColor = const Color(0xFF14B8A6);
-                                } else if (app.service.contains('Soin')) {
-                                  blockColor = const Color(0xFFEC4899);
-                                }
-                                
-                                return Positioned(
-                                  top: top,
-                                  left: 0,
-                                  right: 0,
-                                  height: height - 2, // minor padding
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      showModalBottomSheet(
-                                        context: context,
-                                        isScrollControlled: true,
-                                        backgroundColor: Colors.transparent,
-                                        builder: (_) => _AppointmentDetailsSheetWrapper(
-                                          appointment: app,
-                                          onStatusChanged: (status) {
-                                            setState(() {
-                                              final idx = _appointments.indexWhere((a) => a.id == app.id);
-                                              if (idx != -1) {
-                                                _appointments[idx] = _appointments[idx].copyWith(status: status);
-                                              }
-                                            });
-                                          },
-                                        ),
-                                      );
-                                    },
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        color: blockColor.withOpacity(0.85),
-                                        borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(color: blockColor),
-                                      ),
-                                      padding: const EdgeInsets.all(6),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Icon(
-                                                Icons.person,
-                                                size: 10,
-                                                color: Colors.white.withOpacity(0.9),
-                                              ),
-                                              const SizedBox(width: 3),
-                                              Expanded(
-                                                child: Text(
-                                                  '${app.time} - ${app.clientName}',
-                                                  style: GoogleFonts.outfit(
-                                                    color: Colors.white,
-                                                    fontSize: 11,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                  overflow: TextOverflow.ellipsis,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            app.service,
-                                            style: GoogleFonts.outfit(
-                                              color: Colors.white.withOpacity(0.9),
-                                              fontSize: 10,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              } catch (e) {
-                                return const SizedBox.shrink();
-                              }
-                            }).toList(),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
+          Expanded(child: _AgendaBody(vm: vm)),
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _openNewAppointmentModal,
+        onPressed: () {
+          showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            builder: (_) => ChangeNotifierProvider(
+              create: (_) =>
+                  NewAppointmentViewModel(vm.selectedDate)..loadOptions(),
+              child: NewAppointmentModal(
+                selectedDate: vm.selectedDate,
+                onAdd: (_) async {
+                  await Future.wait([
+                    vm.loadAppointments(),
+                    vm.loadMonthAppointments(
+                        forMonth: vm.selectedDate, force: true),
+                  ]);
+                },
+              ),
+            ),
+          );
+        },
         backgroundColor: const Color(0xFF10B981),
         child: const Icon(Icons.add, color: Colors.white),
       ),
     );
   }
+}
 
-  Widget _buildDropdown({
-    required String value,
-    required List<String> items,
-    required IconData icon,
-    required ValueChanged<String?> onChanged,
-  }) {
+class _EmployeeDropdown extends StatelessWidget {
+  final AgendaViewModel vm;
+  const _EmployeeDropdown({required this.vm});
+
+  @override
+  Widget build(BuildContext context) {
+    final items = <DropdownMenuItem<String>>[
+      const DropdownMenuItem(value: '', child: Text('Tous')),
+      ...vm.employees.map((e) {
+        final id = e['id']?.toString() ?? '';
+        final name = '${e['firstName'] ?? ''} ${e['lastName'] ?? ''}'.trim();
+        return DropdownMenuItem(value: id, child: Text(name.isEmpty ? '—' : name));
+      }),
+    ];
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey[300]!),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: vm.selectedEmployeeId,
+          isExpanded: true,
+          icon: const Icon(Icons.expand_more, size: 18),
+          style: GoogleFonts.outfit(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Colors.black87,
+          ),
+          items: items,
+          onChanged: (v) => vm.setEmployeeId(v ?? ''),
+        ),
+      ),
+    );
+  }
+}
+
+class _SimpleDropdown extends StatelessWidget {
+  final String value;
+  final List<String> items;
+  final ValueChanged<String?> onChanged;
+  const _SimpleDropdown({
+    required this.value,
+    required this.items,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
@@ -351,92 +439,264 @@ class _AgendaScreenState extends State<AgendaScreen> {
       ),
     );
   }
+}
 
-  void _openNewAppointmentModal() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => NewAppointmentModal(
-        selectedDate: _selectedDate,
-        onAdd: (appointment) {
-          setState(() => _appointments.add(appointment));
-        },
+class _AgendaBody extends StatelessWidget {
+  final AgendaViewModel vm;
+  const _AgendaBody({required this.vm});
+
+  Future<void> _handleStatus(
+    BuildContext context,
+    Appointment app,
+    String uiStatus,
+  ) async {
+    if (uiStatus == 'completed') {
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _FinalizeCaisseDialog(appointment: app, vm: vm),
+      );
+      return;
+    }
+    try {
+      await vm.updateStatus(app, uiStatus);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Rendez-vous ${Appointment.labelFr(uiStatus)}',
+              style: GoogleFonts.outfit(fontSize: 13),
+            ),
+            backgroundColor: AppColors.primary,
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e', style: GoogleFonts.outfit())),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (vm.loading) {
+      return const Center(
+          child: CircularProgressIndicator(color: AppColors.primary));
+    }
+    if (vm.error != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(vm.error!, style: GoogleFonts.outfit(color: Colors.red)),
+            TextButton(
+                onPressed: vm.loadAppointments, child: const Text('Réessayer')),
+          ],
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 16, 16, 80),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Column(
+              children: List.generate(11, (index) {
+                final hour = 8 + index;
+                return Container(
+                  height: 70,
+                  alignment: Alignment.topCenter,
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Text(
+                    '${hour.toString().padLeft(2, '0')}:00',
+                    style: GoogleFonts.outfit(
+                      fontSize: 12,
+                      color: Colors.grey[500],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                );
+              }),
+            ),
+            Container(width: 1, height: 770, color: Colors.grey[200]),
+            const SizedBox(width: 8),
+            Expanded(
+              child: SizedBox(
+                height: 770,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final packed =
+                        _packDayAppointments(vm.filteredAppointments);
+                    final totalW = constraints.maxWidth;
+                    const gap = 2.0;
+                    return Stack(
+                      children: [
+                        ...List.generate(11, (index) {
+                          return Positioned(
+                            top: index * 70.0,
+                            left: 0,
+                            right: 0,
+                            child:
+                                Container(height: 1, color: Colors.grey[100]),
+                          );
+                        }),
+                        ...packed.map((slot) {
+                          final app = slot.appointment;
+                          var blockColor = const Color(0xFF60A5FA);
+                          if (app.service.contains('Coupe')) {
+                            blockColor = const Color(0xFF8B5CF6);
+                          } else if (app.service.contains('Coloration')) {
+                            blockColor = const Color(0xFF14B8A6);
+                          } else if (app.service.contains('Soin')) {
+                            blockColor = const Color(0xFFEC4899);
+                          }
+                          final colW = totalW / slot.columnCount;
+                          final left = slot.column * colW;
+                          final width =
+                              math.max(colW - gap, 12.0);
+                          return Positioned(
+                            top: slot.top,
+                            left: left,
+                            width: width,
+                            height: math.max(slot.height - 2, 18),
+                            child: GestureDetector(
+                              onTap: () {
+                                showModalBottomSheet(
+                                  context: context,
+                                  backgroundColor: Colors.transparent,
+                                  isScrollControlled: true,
+                                  builder: (_) => _DetailsSheet(
+                                    appointment: app,
+                                    onStatusChanged: (s) async {
+                                      Navigator.pop(context);
+                                      await _handleStatus(context, app, s);
+                                    },
+                                  ),
+                                );
+                              },
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: blockColor.withOpacity(0.85),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: blockColor),
+                                ),
+                                padding: const EdgeInsets.all(4),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '${app.time} - ${app.clientName}',
+                                      style: GoogleFonts.outfit(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 2,
+                                    ),
+                                    Text(
+                                      app.service,
+                                      style: GoogleFonts.outfit(
+                                        color: Colors.white.withOpacity(0.9),
+                                        fontSize: 10,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        }),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-// Simple details sheet wrapper using existing appointment details UI structure
-class _AppointmentDetailsSheetWrapper extends StatelessWidget {
+class _DetailsSheet extends StatelessWidget {
   final Appointment appointment;
-  final Function(String)? onStatusChanged;
-
-  const _AppointmentDetailsSheetWrapper({
-    required this.appointment,
-    this.onStatusChanged,
-  });
+  final Future<void> Function(String)? onStatusChanged;
+  const _DetailsSheet({required this.appointment, this.onStatusChanged});
 
   @override
   Widget build(BuildContext context) {
+    final canConfirm = Appointment.canConfirm(appointment.status);
+    final canDone = Appointment.canMarkAbsentOrDone(appointment.status);
+
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(24),
-          topRight: Radius.circular(24),
-        ),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
+          Text('Détails du rendez-vous',
+              style: GoogleFonts.outfit(
+                  fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          Text(appointment.clientName,
+              style: GoogleFonts.outfit(fontWeight: FontWeight.w600)),
+          Text(appointment.service),
+          Text('${appointment.time} · ${appointment.duration} min'),
+          Text(appointment.employee),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceGray,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              Appointment.labelFr(appointment.status),
+              style: GoogleFonts.outfit(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textDark,
               ),
             ),
           ),
           const SizedBox(height: 20),
-          Text(
-            'Détails du rendez-vous',
-            style: GoogleFonts.outfit(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 20),
-          _detailRow(Icons.person, 'Client', appointment.clientName),
-          _detailRow(Icons.spa, 'Prestation', appointment.service),
-          _detailRow(Icons.access_time, 'Heure', '${appointment.time} (${appointment.duration} min)'),
-          _detailRow(Icons.badge, 'Collaborateur', appointment.employee),
-          const SizedBox(height: 20),
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: () {
-                    onStatusChanged?.call('confirmed');
-                    Navigator.pop(context);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF10B981),
-                    foregroundColor: Colors.white,
-                  ),
-                  child: const Text('Confirmer'),
+              if (canConfirm)
+                _ActionChip(
+                  label: 'Confirmé',
+                  color: const Color(0xFF10B981),
+                  onTap: () => onStatusChanged?.call('confirmed'),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Fermer'),
+              if (canDone)
+                _ActionChip(
+                  label: 'Terminé',
+                  color: const Color(0xFF3B82F6),
+                  onTap: () => onStatusChanged?.call('completed'),
                 ),
+              if (canDone)
+                _ActionChip(
+                  label: 'Absent',
+                  color: const Color(0xFFF59E0B),
+                  onTap: () => onStatusChanged?.call('no_show'),
+                ),
+              OutlinedButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('Fermer', style: GoogleFonts.outfit()),
               ),
             ],
           ),
@@ -444,23 +704,187 @@ class _AppointmentDetailsSheetWrapper extends StatelessWidget {
       ),
     );
   }
+}
 
-  Widget _detailRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
+class _ActionChip extends StatelessWidget {
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  const _ActionChip({
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton(
+      onPressed: onTap,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: color,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      ),
+      child: Text(label, style: GoogleFonts.outfit(fontWeight: FontWeight.w600)),
+    );
+  }
+}
+
+class _FinalizeCaisseDialog extends StatefulWidget {
+  final Appointment appointment;
+  final AgendaViewModel vm;
+  const _FinalizeCaisseDialog({
+    required this.appointment,
+    required this.vm,
+  });
+
+  @override
+  State<_FinalizeCaisseDialog> createState() => _FinalizeCaisseDialogState();
+}
+
+class _FinalizeCaisseDialogState extends State<_FinalizeCaisseDialog> {
+  String _paymentMethod = 'CASH';
+  bool _loading = false;
+
+  Future<void> _withCaisse() async {
+    setState(() => _loading = true);
+    try {
+      final msg = await widget.vm.completeWithCaisse(
+        widget.appointment,
+        paymentMethod: _paymentMethod,
+      );
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg, style: GoogleFonts.outfit(fontSize: 13)),
+          backgroundColor: AppColors.primary,
+        ),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message, style: GoogleFonts.outfit())),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erreur lors de l’encaissement',
+              style: GoogleFonts.outfit()),
+        ),
+      );
+    }
+  }
+
+  Future<void> _withoutCaisse() async {
+    setState(() => _loading = true);
+    try {
+      await widget.vm.completeWithoutCaisse(widget.appointment);
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Rendez-vous terminé',
+              style: GoogleFonts.outfit(fontSize: 13)),
+          backgroundColor: AppColors.primary,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e', style: GoogleFonts.outfit())),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final apt = widget.appointment;
+    final priceLabel = apt.servicePrice != null && apt.servicePrice! > 0
+        ? ' · ${apt.servicePrice!.toStringAsFixed(0)} DH'
+        : '';
+
+    return AlertDialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Text(
+        'Finaliser le rendez-vous',
+        style: GoogleFonts.outfit(fontWeight: FontWeight.w700, fontSize: 18),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 18, color: const Color(0xFF10B981)),
-          const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: GoogleFonts.outfit(fontSize: 11, color: Colors.grey)),
-              Text(value, style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600)),
-            ],
+          Text(
+            'Voulez-vous ajouter cette prestation à la caisse ?',
+            style: GoogleFonts.outfit(fontSize: 14, color: AppColors.textGray),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${apt.clientName} · ${apt.service}$priceLabel',
+            style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textLight),
+          ),
+          const SizedBox(height: 16),
+          Text('Mode de paiement',
+              style: GoogleFonts.outfit(
+                  fontSize: 12, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          DropdownButtonFormField<String>(
+            value: _paymentMethod,
+            decoration: InputDecoration(
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+            items: _paymentMethods.entries
+                .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
+                .toList(),
+            onChanged: _loading
+                ? null
+                : (v) {
+                    if (v != null) setState(() => _paymentMethod = v);
+                  },
           ),
         ],
       ),
+      actionsAlignment: MainAxisAlignment.center,
+      actions: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ElevatedButton(
+              onPressed: _loading ? null : _withCaisse,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF3B82F6),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24)),
+              ),
+              child: Text(
+                _loading ? 'Traitement…' : 'Ajouter à la caisse',
+                style: GoogleFonts.outfit(fontWeight: FontWeight.w700),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: _loading ? null : _withoutCaisse,
+              child: Text('Terminé sans caisse',
+                  style: GoogleFonts.outfit(fontWeight: FontWeight.w600)),
+            ),
+            TextButton(
+              onPressed: _loading ? null : () => Navigator.pop(context),
+              child: Text('Annuler',
+                  style: GoogleFonts.outfit(color: AppColors.textGray)),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

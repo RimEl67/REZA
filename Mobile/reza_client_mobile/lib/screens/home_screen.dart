@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../constants.dart';
+import 'package:provider/provider.dart';
 import '../models/venue_mapper.dart';
-import '../services/discovery_service.dart';
+import '../viewmodels/home_viewmodel.dart';
+import '../widgets/geo_prompt_banner.dart';
 import '../widgets/reza_bottom_nav.dart';
 import 'search_results_screen.dart';
 import 'venue_detail_screen.dart';
@@ -10,62 +12,50 @@ import 'bookings_screen.dart';
 import 'proches_screen.dart';
 import 'profile_screen.dart';
 
-class HomeScreen extends StatefulWidget {
+class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (_) {
+        final vm = HomeViewModel();
+        vm.loadTenants();
+        vm.initGeoPrompt();
+        return vm;
+      },
+      child: const _HomeScreenBody(),
+    );
+  }
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  int _navIndex = 0;
-  String _searchCategory = 'Prestations (coupe, barbier...)';
-  String _searchCity = 'Casablanca';
-  String? _selectedCategory;
-  List<VenueItem> _venues = List.from(allVenues);
-  bool _loading = true;
-  String? _error;
+class _HomeScreenBody extends StatefulWidget {
+  const _HomeScreenBody();
 
   @override
-  void initState() {
-    super.initState();
-    _loadTenants();
-  }
+  State<_HomeScreenBody> createState() => _HomeScreenState();
+}
 
-  Future<void> _loadTenants({String? category}) async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final tenants = await discoveryService.searchTenants(
-        city: 'Casablanca',
-        category: category,
-        limit: 50,
-      );
-      final mapped = tenants.map((t) => tenantToVenueItem(t)).toList();
-      if (!mounted) return;
-      setState(() {
-        _venues = mapped.isNotEmpty ? mapped : List.from(allVenues);
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _venues = List.from(allVenues);
-        _loading = false;
-        _error = e.toString();
-      });
-    }
-  }
+class _HomeScreenState extends State<_HomeScreenBody> {
+  int _navIndex = 0;
 
-  List<VenueItem> get _filteredVenues {
-    if (_selectedCategory == null || _selectedCategory!.isEmpty) return _venues;
-    final cat = _selectedCategory!.toLowerCase();
-    return _venues
-        .where((v) => v.category.toLowerCase().contains(cat) || cat.contains(v.category.toLowerCase()))
-        .toList();
-  }
+  HomeViewModel get _vm => context.watch<HomeViewModel>();
+
+  Future<void> _loadTenants({String? category}) =>
+      context.read<HomeViewModel>().loadTenants(category: category);
+
+  List<VenueItem> get _filteredVenues => _vm.filteredVenues;
+
+  String get _searchCityLabel => _vm.searchCityLabel;
+
+  String? get _selectedCategory => _vm.selectedCategory;
+  set _selectedCategory(String? v) => _vm.setCategory(v);
+
+  set _searchCategory(String v) => _vm.setSearchCategory(v);
+  String get _searchCategory => _vm.searchCategory;
+
+  bool get _loading => _vm.loading;
+  String? get _error => _vm.error;
 
   void _openVenue(VenueItem venue) {
     Navigator.push(
@@ -90,12 +80,11 @@ class _HomeScreenState extends State<HomeScreen> {
               title: Text(categories[index], style: GoogleFonts.inter(fontSize: 16)),
               onTap: () {
                 final label = categories[index];
-                setState(() {
-                  _searchCategory = label;
-                  _selectedCategory = label == 'Tous' ? null : label;
-                });
+                final vm = context.read<HomeViewModel>();
+                vm.searchCategory = label;
+                vm.setCategory(label == 'Tous' ? null : label);
                 Navigator.pop(context);
-                _loadTenants(category: _selectedCategory);
+                vm.loadTenants(category: vm.selectedCategory);
               },
             );
           },
@@ -105,7 +94,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showCityPicker() {
-    final cities = ['Casablanca', 'Rabat', 'Marrakech', 'Tanger', 'Agadir'];
+    final cities = ['Toutes les villes', 'Casablanca', 'Rabat', 'Marrakech', 'Tanger', 'Agadir'];
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
@@ -120,8 +109,11 @@ class _HomeScreenState extends State<HomeScreen> {
               leading: const Icon(Icons.location_on_outlined, color: AppColors.textGray),
               title: Text(cities[index], style: GoogleFonts.inter(fontSize: 16)),
               onTap: () {
-                setState(() => _searchCity = cities[index]);
+                final vm = context.read<HomeViewModel>();
+                final label = cities[index];
+                vm.setSearchCity(label == 'Toutes les villes' ? '' : label);
                 Navigator.pop(context);
+                vm.loadTenants(category: vm.selectedCategory);
               },
             );
           },
@@ -247,7 +239,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               const Icon(Icons.location_on_outlined, color: AppColors.textGray, size: 20),
                               const SizedBox(width: 12),
                               Text(
-                                _searchCity,
+                                _searchCityLabel,
                                 style: GoogleFonts.inter(color: AppColors.textDark, fontSize: 14, fontWeight: FontWeight.w600),
                               ),
                             ],
@@ -291,7 +283,28 @@ class _HomeScreenState extends State<HomeScreen> {
               if (_error != null && !_loading)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Text('Mode hors-ligne · données locales', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textLight)),
+                  child: Text(
+                    'Impossible de charger les salons. Vérifiez la connexion API.',
+                    style: GoogleFonts.inter(fontSize: 12, color: AppColors.textLight),
+                  ),
+                ),
+              if (!_loading && _error == null && list.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  child: Text(
+                    'Aucun salon trouvé. Essayez une autre ville ou élargissez la recherche.',
+                    style: GoogleFonts.inter(fontSize: 13, color: AppColors.textGray),
+                  ),
+                ),
+              if ((_vm.showGeoPrompt == true || _vm.geoError != null) && !_vm.hasUserLocation)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                  child: GeoPromptBanner(
+                    loading: _vm.geoLoading,
+                    error: _vm.geoError,
+                    onUseLocation: () => context.read<HomeViewModel>().requestUserLocation(),
+                    onDismiss: () => context.read<HomeViewModel>().dismissGeoPrompt(),
+                  ),
                 ),
               SizedBox(
                 height: 115,
@@ -403,7 +416,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: _buildProfessionalCard(
                       ProfessionalItem(
                         name: v.name,
-                        distance: v.distance.isNotEmpty ? v.distance : 'Casablanca',
+                        distance: v.distance,
                         role: v.category,
                         avatarUrl: v.image,
                       ),
@@ -494,7 +507,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              '${venue.distance.isNotEmpty ? venue.distance : "Casablanca"} · ${venue.location}',
+              venueMetaLine(venue),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: GoogleFonts.inter(fontSize: 12, color: AppColors.textGray),
@@ -566,7 +579,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Text('${venue.category} · ${venue.reviews} avis', style: GoogleFonts.inter(fontSize: 12, color: AppColors.textGray)),
             const SizedBox(height: 2),
             Text(
-              '${venue.distance.isNotEmpty ? venue.distance : "Casablanca"} · ${venue.location}',
+              venueMetaLine(venue),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: GoogleFonts.inter(fontSize: 12, color: AppColors.textGray),
@@ -620,7 +633,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              '${venue.distance.isNotEmpty ? venue.distance : ""} · ${venue.location}',
+              venueMetaLine(venue),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: GoogleFonts.inter(fontSize: 12, color: AppColors.textGray),
@@ -657,8 +670,12 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 Text(prof.name, style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textDark)),
                 const SizedBox(height: 4),
-                Text('${prof.distance} · ${prof.role}', maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.inter(fontSize: 12, color: AppColors.textGray)),
+                Text(
+                  prof.distance.isNotEmpty ? '${prof.distance} · ${prof.role}' : prof.role,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(fontSize: 12, color: AppColors.textGray),
+                ),
               ],
             ),
           ),

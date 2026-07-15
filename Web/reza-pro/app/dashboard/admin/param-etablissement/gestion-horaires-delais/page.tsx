@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { usePathname } from 'next/navigation';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import Link from 'next/link';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { 
   Calendar, 
   Clock, 
@@ -27,6 +28,7 @@ import {
 } from '@/components/ui/select';
 import DatePickerDemo from '@/components/ui/datepicker';
 import { api } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 import toast from 'react-hot-toast';
 
 type DaySchedule = {
@@ -117,6 +119,9 @@ const ExceptionalEditModal: React.FC<{ schedule: ExceptionalSchedule, onClose: (
 
 const GestionHoraires = () => {
   const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { salons, effectiveSalonIds } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [activeTab, setActiveTab] = useState<'establishment' | 'exceptional' | 'agenda' | 'delays'>('establishment');
@@ -124,6 +129,27 @@ const GestionHoraires = () => {
   const [saving, setSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [onlineBooking, setOnlineBooking] = useState<'open' | 'closed'>('open');
+
+  const querySalonId = searchParams.get('salonId') || searchParams.get('tenantId');
+  const scopedSalonId = useMemo(() => {
+    if (querySalonId) {
+      // Trust query while salons list still loading; reject only after load
+      if (salons.length === 0) return querySalonId;
+      return salons.some((s) => s.id === querySalonId) ? querySalonId : null;
+    }
+    if (effectiveSalonIds.length === 1) return effectiveSalonIds[0];
+    if (salons.length === 1) return salons[0].id;
+    return null;
+  }, [querySalonId, salons, effectiveSalonIds]);
+
+  const scopedSalon = useMemo(
+    () => (scopedSalonId ? salons.find((s) => s.id === scopedSalonId) : undefined),
+    [salons, scopedSalonId]
+  );
+  const salonScope = useMemo(
+    () => (scopedSalonId ? { salonIds: scopedSalonId } : undefined),
+    [scopedSalonId]
+  );
   
   // Default schedules structure
   const defaultSchedules: DaySchedule[] = [
@@ -155,24 +181,76 @@ const GestionHoraires = () => {
   const [showEditExceptionalModal, setShowEditExceptionalModal] = useState(false);
   const [selectedExceptionalSchedule, setSelectedExceptionalSchedule] = useState<ExceptionalSchedule | null>(null);
 
+  const fetchBusinessHours = useCallback(async () => {
+    if (!scopedSalonId || !salonScope) return;
+    try {
+      setLoading(true);
+      const data = await api.getBusinessHours(salonScope);
+      
+      // Merge saved schedules with default structure (API may omit breaks)
+      if (data.schedules && data.schedules.length > 0) {
+        const mergedSchedules = defaultSchedules.map(defSchedule => {
+          const saved = data.schedules.find((s: any) => s.day === defSchedule.day);
+          if (!saved) return defSchedule;
+          return {
+            ...defSchedule,
+            ...saved,
+            breaks: Array.isArray(saved.breaks) ? saved.breaks : [],
+          };
+        });
+        setSchedules(mergedSchedules);
+      }
+      
+      setOnlineBooking(data.onlineBooking || 'open');
+      setExceptionalSchedules(data.exceptionalSchedules || []);
+      setAgendaStart(data.agendaStart || '08:00');
+      setAgendaEnd(data.agendaEnd || '23:55');
+      setBookingDelay(data.bookingDelay || { value: '1', unit: 'jours', allowLastMoment: false });
+      setCancellationDelay(data.cancellationDelay || { value: '1', unit: 'jours', allowLastMoment: false });
+      setAdvanceBooking(data.advanceBooking || { value: '1', unit: 'mois' });
+    } catch (err: any) {
+      console.error('Error fetching business hours:', err);
+      toast.error(err.message || 'Erreur lors du chargement des horaires');
+    } finally {
+      setLoading(false);
+    }
+  // defaultSchedules is stable literal shape; omit from deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopedSalonId, salonScope]);
+
   useEffect(() => {
     setMounted(true);
-    fetchBusinessHours();
     const timer = setInterval(() => {
       setCurrentTime(new Date());
     }, 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // Refetch data when pathname changes (user navigates to this page)
+  // Require a single known salon — no multi-filter gate
   useEffect(() => {
-    if (mounted && pathname === '/dashboard/admin/param-etablissement/gestion-horaires-delais') {
+    if (!mounted) return;
+    // Wait for account salons to load before deciding redirect
+    if (salons.length === 0) return;
+    if (!scopedSalonId) {
+      router.replace('/dashboard/mes-salons');
+      return;
+    }
+    if (!querySalonId || querySalonId !== scopedSalonId) {
+      router.replace(
+        `/dashboard/admin/param-etablissement/gestion-horaires-delais?salonId=${scopedSalonId}`
+      );
+    }
+  }, [mounted, scopedSalonId, querySalonId, router, salons.length]);
+
+  useEffect(() => {
+    if (mounted && scopedSalonId) {
       fetchBusinessHours();
     }
-  }, [pathname, mounted]);
+  }, [mounted, scopedSalonId, pathname, fetchBusinessHours]);
 
   // Refetch data when page becomes visible (user navigates back to tab)
   useEffect(() => {
+    if (!scopedSalonId) return;
     const handleVisibilityChange = () => {
       if (!document.hidden && mounted) {
         fetchBusinessHours();
@@ -192,38 +270,10 @@ const GestionHoraires = () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [mounted]);
-
-  const fetchBusinessHours = async () => {
-    try {
-      setLoading(true);
-      const data = await api.getBusinessHours();
-      
-      // Merge saved schedules with default structure
-      if (data.schedules && data.schedules.length > 0) {
-        const mergedSchedules = defaultSchedules.map(defSchedule => {
-          const saved = data.schedules.find((s: any) => s.day === defSchedule.day);
-          return saved || defSchedule;
-        });
-        setSchedules(mergedSchedules);
-      }
-      
-      setOnlineBooking(data.onlineBooking || 'open');
-      setExceptionalSchedules(data.exceptionalSchedules || []);
-      setAgendaStart(data.agendaStart || '08:00');
-      setAgendaEnd(data.agendaEnd || '23:55');
-      setBookingDelay(data.bookingDelay || { value: '1', unit: 'jours', allowLastMoment: false });
-      setCancellationDelay(data.cancellationDelay || { value: '1', unit: 'jours', allowLastMoment: false });
-      setAdvanceBooking(data.advanceBooking || { value: '1', unit: 'mois' });
-    } catch (err: any) {
-      console.error('Error fetching business hours:', err);
-      toast.error(err.message || 'Erreur lors du chargement des horaires');
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [mounted, scopedSalonId, fetchBusinessHours]);
 
   const saveBusinessHours = async () => {
+    if (!salonScope) return;
     try {
       setSaving(true);
       const loadingToast = toast.loading('Enregistrement des horaires...');
@@ -237,7 +287,7 @@ const GestionHoraires = () => {
         bookingDelay,
         cancellationDelay,
         advanceBooking
-      });
+      }, salonScope);
       
       toast.dismiss(loadingToast);
       toast.success('Horaires enregistrés avec succès');
@@ -265,13 +315,21 @@ const GestionHoraires = () => {
 
   const addBreak = (index: number) => {
     const newSchedules = [...schedules];
-    newSchedules[index].breaks.push({ start: '12:00', end: '14:00' });
+    const breaks = newSchedules[index].breaks ?? [];
+    newSchedules[index] = {
+      ...newSchedules[index],
+      breaks: [...breaks, { start: '12:00', end: '14:00' }],
+    };
     setSchedules(newSchedules);
   };
 
   const removeBreak = (scheduleIndex: number, breakIndex: number) => {
     const newSchedules = [...schedules];
-    newSchedules[scheduleIndex].breaks.splice(breakIndex, 1);
+    const breaks = newSchedules[scheduleIndex].breaks ?? [];
+    newSchedules[scheduleIndex] = {
+      ...newSchedules[scheduleIndex],
+      breaks: breaks.filter((_, i) => i !== breakIndex),
+    };
     setSchedules(newSchedules);
   };
 
@@ -282,6 +340,7 @@ const GestionHoraires = () => {
   };
 
   const handleSaveExceptional = async (updatedSchedule: ExceptionalSchedule) => {
+    if (!salonScope) return;
     const updated = exceptionalSchedules.map(s => s.id === updatedSchedule.id ? updatedSchedule : s);
     setExceptionalSchedules(updated);
     setShowEditExceptionalModal(false);
@@ -298,7 +357,7 @@ const GestionHoraires = () => {
         bookingDelay,
         cancellationDelay,
         advanceBooking
-      });
+      }, salonScope);
       toast.success('Horaire exceptionnel mis à jour');
     } catch (err: any) {
       toast.error(err.message || 'Erreur lors de la mise à jour');
@@ -306,6 +365,7 @@ const GestionHoraires = () => {
   };
 
   const handleAddExceptionalSchedule = async () => {
+    if (!salonScope) return;
     const newSchedule: ExceptionalSchedule = {
       id: Date.now(),
       date: new Date().toISOString().split('T')[0],
@@ -327,7 +387,7 @@ const GestionHoraires = () => {
         bookingDelay,
         cancellationDelay,
         advanceBooking
-      });
+      }, salonScope);
       toast.success('Horaire exceptionnel ajouté');
     } catch (err: any) {
       setExceptionalSchedules(exceptionalSchedules);
@@ -336,6 +396,7 @@ const GestionHoraires = () => {
   };
 
   const handleDeleteExceptionalSchedule = async (id: number) => {
+    if (!salonScope) return;
     const updated = exceptionalSchedules.filter(s => s.id !== id);
     setExceptionalSchedules(updated);
     
@@ -350,7 +411,7 @@ const GestionHoraires = () => {
         bookingDelay,
         cancellationDelay,
         advanceBooking
-      });
+      }, salonScope);
       toast.success('Horaire exceptionnel supprimé');
     } catch (err: any) {
       setExceptionalSchedules(exceptionalSchedules);
@@ -358,7 +419,7 @@ const GestionHoraires = () => {
     }
   };
 
-  if (!mounted) {
+  if (!mounted || !scopedSalonId) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 p-4 md:p-6">
         <div className="animate-pulse space-y-4">
@@ -398,14 +459,26 @@ const GestionHoraires = () => {
       )}
 
       {/* Header - Ultra Minimalist Premium */}
-      <div className="mb-8 animate-slideDown pt-20">
+      <div className="mb-8 animate-slideDown">
         <div className="flex items-center justify-between">
           {/* Left: Title */}
           <div className="flex items-center gap-8">
             <div className="flex flex-col gap-2">
+              <Link
+                href="/dashboard/mes-salons"
+                className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-[#002366] transition-colors w-fit"
+              >
+                <ChevronLeft size={16} />
+                Mes salons
+              </Link>
               <h1 className="text-5xl font-light text-gray-900 tracking-tight">
                 Horaires
               </h1>
+              {scopedSalon && (
+                <p className="text-sm font-medium text-[#002366]">
+                  {scopedSalon.name}
+                </p>
+              )}
               {/* Time below title */}
               <div className="flex items-baseline gap-1 mt-2">
                 <span className="text-2xl font-light text-gray-900 tabular-nums tracking-tight">
@@ -595,13 +668,15 @@ const GestionHoraires = () => {
                       </button>
                       
                       {/* Breaks */}
-                      {schedule.breaks.map((breakTime, breakIndex) => (
+                      {(schedule.breaks ?? []).map((breakTime, breakIndex) => (
                         <div key={breakIndex} className="flex items-center gap-2 ml-4">
                           <DatePickerDemo
                             value={breakTime.start}
                             onChange={value => {
                               const newSchedules = [...schedules];
-                              newSchedules[originalIndex].breaks[breakIndex].start = value;
+                              const breaks = [...(newSchedules[originalIndex].breaks ?? [])];
+                              breaks[breakIndex] = { ...breaks[breakIndex], start: value };
+                              newSchedules[originalIndex] = { ...newSchedules[originalIndex], breaks };
                               setSchedules(newSchedules);
                             }}
                           />
@@ -610,7 +685,9 @@ const GestionHoraires = () => {
                             value={breakTime.end}
                             onChange={value => {
                               const newSchedules = [...schedules];
-                              newSchedules[originalIndex].breaks[breakIndex].end = value;
+                              const breaks = [...(newSchedules[originalIndex].breaks ?? [])];
+                              breaks[breakIndex] = { ...breaks[breakIndex], end: value };
+                              newSchedules[originalIndex] = { ...newSchedules[originalIndex], breaks };
                               setSchedules(newSchedules);
                             }}
                           />

@@ -55,11 +55,27 @@ export interface ApiError {
 class ApiClient {
   private baseURL: string;
   private token: string | null = null;
+  /** 'all' or concrete salon tenant ids for X-Salon-Ids */
+  private salonFilter: 'all' | string[] = 'all';
 
   constructor(baseURL: string) {
     this.baseURL = baseURL;
     if (typeof window !== 'undefined') {
       this.token = localStorage.getItem('token');
+      try {
+        const raw = localStorage.getItem('activeSalonIds');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            if (parsed.length === 1 && parsed[0] === 'all') this.salonFilter = 'all';
+            else if (parsed.every((x: unknown) => typeof x === 'string')) {
+              this.salonFilter = parsed as string[];
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -76,6 +92,21 @@ class ApiClient {
       localStorage.removeItem('token');
       console.log('[API] Token removed from localStorage');
     }
+  }
+
+  setSalonFilter(filter: 'all' | string[]) {
+    this.salonFilter = filter === 'all' || filter.length === 0 ? 'all' : filter;
+  }
+
+  getSalonFilter(): 'all' | string[] {
+    return this.salonFilter;
+  }
+
+  private salonHeaders(salonIds?: string | string[]): Record<string, string> | undefined {
+    if (!salonIds) return undefined;
+    const ids = Array.isArray(salonIds) ? salonIds : [salonIds];
+    if (ids.length === 0) return undefined;
+    return { 'X-Salon-Ids': ids.join(',') };
   }
 
   private async request<T>(
@@ -130,6 +161,20 @@ class ApiClient {
       if (!endpoint.includes('/auth/')) {
         console.error(`[API] No token found for request to: ${endpoint}. Please log in again.`);
         console.error(`[API] localStorage.getItem('token'):`, typeof window !== 'undefined' ? localStorage.getItem('token') : 'N/A');
+      }
+    }
+
+    // Multi-salon filter (skip auth/public paths)
+    if (
+      currentToken &&
+      !endpoint.startsWith('/auth/') &&
+      !endpoint.startsWith('/public/') &&
+      !headers['X-Salon-Ids']
+    ) {
+      if (this.salonFilter === 'all') {
+        headers['X-Salon-Ids'] = 'all';
+      } else if (Array.isArray(this.salonFilter) && this.salonFilter.length > 0) {
+        headers['X-Salon-Ids'] = this.salonFilter.join(',');
       }
     }
 
@@ -297,6 +342,254 @@ class ApiClient {
     this.setToken(null);
   }
 
+  // Multi-salon endpoints
+  async getSalons() {
+    return this.request<{
+      salons: {
+        id: string;
+        name: string;
+        email?: string;
+        phone?: string | null;
+        address?: string | null;
+        city: string | null;
+        category?: string | null;
+        shortDescription?: string | null;
+        coverImage?: string | null;
+        subscriptionActive: boolean;
+      }[];
+      salonLimit: number;
+      subscription: any;
+      account: { id: string; isActive: boolean } | null;
+    }>('/salons');
+  }
+
+  private async salonMultipart(
+    method: 'POST' | 'PATCH',
+    path: string,
+    data: {
+      name?: string;
+      email?: string;
+      phone?: string;
+      address?: string;
+      city?: string;
+      category?: string;
+      shortDescription?: string;
+      coverImage?: File;
+      latitude?: number;
+      longitude?: number;
+    },
+    failMessage: string
+  ) {
+    const formData = new FormData();
+    if (data.name !== undefined) formData.append('name', data.name);
+    if (data.email !== undefined) formData.append('email', data.email);
+    if (data.phone !== undefined) formData.append('phone', data.phone);
+    if (data.city !== undefined) formData.append('city', data.city);
+    if (data.category !== undefined) formData.append('category', data.category);
+    if (data.shortDescription !== undefined) formData.append('shortDescription', data.shortDescription);
+    if (data.address !== undefined) formData.append('address', data.address);
+    if (data.latitude !== undefined) formData.append('latitude', String(data.latitude));
+    if (data.longitude !== undefined) formData.append('longitude', String(data.longitude));
+    if (data.coverImage) formData.append('coverImage', data.coverImage);
+
+    const url = `${this.baseURL}${path}`;
+    const headers: HeadersInit = {};
+    const currentToken = this.token || (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
+    if (currentToken) {
+      headers['Authorization'] = `Bearer ${currentToken}`;
+    }
+
+    const response = await fetch(url, {
+      method,
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({
+        error: failMessage,
+        message: `HTTP ${response.status}: ${response.statusText}`,
+      }));
+      throw new Error(error.message || error.error || failMessage);
+    }
+
+    return response.json();
+  }
+
+  async createSalon(data: {
+    name: string;
+    email: string;
+    phone: string;
+    address?: string;
+    city: string;
+    category: string;
+    shortDescription: string;
+    coverImage: File;
+    latitude: number;
+    longitude: number;
+  }) {
+    return this.salonMultipart('POST', '/salons', data, 'Impossible de créer le salon') as Promise<{
+      salon: {
+        id: string;
+        name: string;
+        city: string | null;
+        subscriptionActive: boolean;
+        coverImage?: string | null;
+        latitude?: number | null;
+        longitude?: number | null;
+      };
+    }>;
+  }
+
+  async updateSalon(
+    id: string,
+    data: {
+      name?: string;
+      email?: string;
+      phone?: string;
+      address?: string;
+      city?: string;
+      category?: string;
+      shortDescription?: string;
+      coverImage?: File;
+      latitude?: number;
+      longitude?: number;
+    }
+  ) {
+    return this.salonMultipart('PATCH', `/salons/${id}`, data, 'Impossible de mettre à jour le salon') as Promise<{
+      salon: {
+        id: string;
+        name: string;
+        email: string;
+        phone: string | null;
+        address: string | null;
+        city: string | null;
+        category: string | null;
+        shortDescription: string | null;
+        coverImage: string | null;
+        subscriptionActive: boolean;
+        latitude: number | null;
+        longitude: number | null;
+      };
+    }>;
+  }
+
+  async deleteSalon(id: string) {
+    return this.request<{
+      success: boolean;
+      softDeleted: boolean;
+      salons: any[];
+      salonLimit: number;
+      subscription: any;
+      account: any;
+      activeTenantId?: string;
+      token?: string;
+      switchedTo?: { id: string; name: string };
+    }>(`/salons/${id}`, { method: 'DELETE' });
+  }
+
+  /** Switch active salon: backend re-issues a token scoped to that salon. */
+  async switchSalon(tenantId: string) {
+    const data = await this.request<{ token: string; user: any; salons: any[]; activeTenantId: string; subscription: any; salonLimit: number }>(
+      '/auth/switch-salon',
+      { method: 'POST', body: JSON.stringify({ tenantId }) }
+    );
+    if (data.token) {
+      this.setToken(data.token);
+    }
+    return data;
+  }
+
+  // Subscription endpoints
+  async getSubscription() {
+    return this.request<{ account: any; subscription: any; salonLimit: number; salonCount: number }>(
+      '/subscription'
+    );
+  }
+
+  async startCheckout(planId?: string) {
+    return this.request<{ url: string; sessionId: string }>('/subscription/checkout', {
+      method: 'POST',
+      body: JSON.stringify(planId ? { planId } : {}),
+    });
+  }
+
+  // Superadmin endpoints
+  async superAdminGetAccounts(params?: {
+    page?: number;
+    limit?: number;
+    q?: string;
+    planId?: string;
+    endsAfter?: string;
+    endsBefore?: string;
+  }) {
+    const qs = new URLSearchParams();
+    if (params?.page != null) qs.set('page', String(params.page));
+    if (params?.limit != null) qs.set('limit', String(params.limit));
+    if (params?.q) qs.set('q', params.q);
+    if (params?.planId) qs.set('planId', params.planId);
+    if (params?.endsAfter) qs.set('endsAfter', params.endsAfter);
+    if (params?.endsBefore) qs.set('endsBefore', params.endsBefore);
+    const query = qs.toString();
+    return this.request<{
+      accounts: any[];
+      total: number;
+      page: number;
+      limit: number;
+    }>(`/superadmin/accounts${query ? `?${query}` : ''}`);
+  }
+
+  async superAdminUpdateAccount(
+    accountId: string,
+    data: {
+      isActive?: boolean;
+      subscriptionStatus?: 'NONE' | 'ACTIVE' | 'PAST_DUE' | 'CANCELED';
+      planId?: string;
+      currentPeriodEnd?: string | null;
+    }
+  ) {
+    return this.request<{ success: boolean }>(`/superadmin/accounts/${accountId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async superAdminGetPlans() {
+    return this.request<{ plans: any[] }>('/superadmin/plans');
+  }
+
+  async superAdminCreatePlan(data: {
+    name: string;
+    priceCents: number;
+    currency?: string;
+    interval?: 'month' | 'year';
+    maxSalons: number;
+    stripePriceId?: string;
+  }) {
+    return this.request<{ plan: any }>('/superadmin/plans', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async superAdminUpdatePlan(
+    planId: string,
+    data: {
+      name?: string;
+      priceCents?: number;
+      currency?: string;
+      interval?: 'month' | 'year';
+      maxSalons?: number;
+      stripePriceId?: string | null;
+      isActive?: boolean;
+    }
+  ) {
+    return this.request<{ plan: any }>(`/superadmin/plans/${planId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
   async verifyEmail(token: string, email: string) {
     return this.request<{ message: string; emailVerified: boolean }>('/auth/verify-email', {
       method: 'POST',
@@ -312,13 +605,18 @@ class ApiClient {
   }
 
   // Client endpoints
-  async getClients(params?: { search?: string; status?: string; page?: number; limit?: number }) {
+  async getClients(
+    params?: { search?: string; status?: string; page?: number; limit?: number },
+    opts?: { salonIds?: string | string[] }
+  ) {
     const query = new URLSearchParams();
     if (params?.search) query.append('search', params.search);
     if (params?.status) query.append('status', params.status);
     if (params?.page) query.append('page', params.page.toString());
     if (params?.limit) query.append('limit', params.limit.toString());
-    return this.request<any>(`/clients?${query.toString()}`);
+    return this.request<any>(`/clients?${query.toString()}`, {
+      headers: this.salonHeaders(opts?.salonIds),
+    });
   }
 
   async getClient(id: string) {
@@ -408,12 +706,17 @@ class ApiClient {
   }
 
   // Service endpoints
-  async getServices(params?: { category?: string; search?: string }) {
+  async getServices(
+    params?: { category?: string; search?: string },
+    opts?: { salonIds?: string | string[] }
+  ) {
     const query = new URLSearchParams();
     if (params?.category) query.append('category', params.category);
     if (params?.search) query.append('search', params.search);
     const queryString = query.toString();
-    return this.request<any>(`/services${queryString ? `?${queryString}` : ''}`);
+    return this.request<any>(`/services${queryString ? `?${queryString}` : ''}`, {
+      headers: this.salonHeaders(opts?.salonIds),
+    });
   }
 
   async getService(id: string) {
@@ -441,11 +744,16 @@ class ApiClient {
   }
 
   // Employee endpoints
-  async getEmployees(params?: { active?: boolean; search?: string }) {
+  async getEmployees(
+    params?: { active?: boolean; search?: string },
+    opts?: { salonIds?: string | string[] }
+  ) {
     const query = new URLSearchParams();
     if (params?.active !== undefined) query.append('active', params.active.toString());
     if (params?.search) query.append('search', params.search);
-    return this.request<any>(`/employees?${query.toString()}`);
+    return this.request<any>(`/employees?${query.toString()}`, {
+      headers: this.salonHeaders(opts?.salonIds),
+    });
   }
 
   async getEmployee(id: string) {
@@ -546,6 +854,23 @@ class ApiClient {
     return this.request<any>('/invoices', {
       method: 'POST',
       body: JSON.stringify(invoiceData),
+    });
+  }
+
+  /** Flow A — Encaisser une vente (PAID invoice + service line items) */
+  async createSale(saleData: {
+    clientId: string;
+    items: Array<{ serviceId: string; price?: number; quantity?: number }>;
+    amount?: number;
+    tax?: number;
+    paymentMethod: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK' | 'ONLINE';
+    notes?: string;
+    tenantId?: string;
+    appointmentId?: string;
+  }) {
+    return this.request<any>('/invoices/sale', {
+      method: 'POST',
+      body: JSON.stringify(saleData),
     });
   }
 
@@ -790,24 +1115,30 @@ class ApiClient {
     });
   }
 
-  // Business hours and scheduling endpoints
-  async getBusinessHours() {
-    return this.request<any>('/tenant/settings/business-hours');
+  // Business hours and scheduling endpoints (pass salonIds to scope to one salon)
+  async getBusinessHours(opts?: { salonIds?: string | string[] }) {
+    return this.request<any>('/tenant/settings/business-hours', {
+      headers: this.salonHeaders(opts?.salonIds),
+    });
   }
 
-  async updateBusinessHours(data: {
-    onlineBooking?: 'open' | 'closed';
-    schedules?: any[];
-    exceptionalSchedules?: any[];
-    agendaStart?: string;
-    agendaEnd?: string;
-    bookingDelay?: any;
-    cancellationDelay?: any;
-    advanceBooking?: any;
-  }) {
+  async updateBusinessHours(
+    data: {
+      onlineBooking?: 'open' | 'closed';
+      schedules?: any[];
+      exceptionalSchedules?: any[];
+      agendaStart?: string;
+      agendaEnd?: string;
+      bookingDelay?: any;
+      cancellationDelay?: any;
+      advanceBooking?: any;
+    },
+    opts?: { salonIds?: string | string[] }
+  ) {
     return this.request<any>('/tenant/settings/business-hours', {
       method: 'PUT',
       body: JSON.stringify(data),
+      headers: this.salonHeaders(opts?.salonIds),
     });
   }
 
@@ -1070,7 +1401,7 @@ class ApiClient {
   async getCashTransactions(params?: {
     startDate?: string;
     endDate?: string;
-    type?: 'DEPOSIT' | 'WITHDRAWAL' | 'all';
+    type?: 'DEPOSIT' | 'WITHDRAWAL' | 'REFUND' | 'all';
     page?: number;
     limit?: number;
   }) {
@@ -1088,10 +1419,11 @@ class ApiClient {
   }
 
   async createCashTransaction(transactionData: {
-    type: 'DEPOSIT' | 'WITHDRAWAL';
+    type: 'DEPOSIT' | 'WITHDRAWAL' | 'REFUND';
     amount: number;
     paymentMethod: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK' | 'ONLINE';
     notes?: string;
+    tenantId?: string;
   }) {
     return this.request<any>('/cash-transactions', {
       method: 'POST',

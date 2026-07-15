@@ -41,7 +41,14 @@ type ApiInvoice = {
     lastName: string;
     email: string | null;
     phone: string | null;
-  };
+  } | null;
+  items?: Array<{
+    id: string;
+    serviceId: string | null;
+    serviceName: string;
+    price: number;
+    quantity: number;
+  }>;
   appointment: {
     id: string;
     startTime: string;
@@ -54,6 +61,40 @@ type ApiInvoice = {
     } | null;
   } | null;
 };
+
+type CatalogService = {
+  id: string;
+  name: string;
+  price: number | null;
+  priceFrom?: number | null;
+  tenantId?: string;
+};
+
+type ModalMode = 'sale' | 'movement';
+
+const PAYMENT_METHOD_TO_API: Record<string, 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK' | 'ONLINE'> = {
+  Espèces: 'CASH',
+  Carte: 'CARD',
+  Virement: 'BANK_TRANSFER',
+  Chèque: 'CHECK',
+};
+
+const emptySaleForm = () => ({
+  serviceIds: [] as string[],
+  amount: 0,
+  method: 'Espèces' as Transaction['method'],
+  clientId: '',
+  note: '',
+  tenantId: '',
+});
+
+const emptyMovementForm = () => ({
+  type: 'Dépôt' as 'Dépôt' | 'Retrait' | 'Remboursement',
+  amount: 0,
+  method: 'Espèces' as Transaction['method'],
+  note: '',
+  tenantId: '',
+});
 
 interface CaissePageProps {
   methodFilter?: 'all' | 'Espèces' | 'Carte' | 'Virement' | 'Chèque';
@@ -74,7 +115,8 @@ function CaissePageContent({
 }: CaissePageProps = {}) {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { isAuthenticated, loading: authLoading } = useAuth();
+  const { isAuthenticated, loading: authLoading, salonFilter, effectiveSalonIds, isSalonFilterMulti, salons } = useAuth();
+  const salonFilterKey = salonFilter === 'all' ? 'all' : effectiveSalonIds.join(',');
   
   // Initialize filters from URL params or props or default to 'all'
   const [internalMethodFilter, setInternalMethodFilter] = useState<'all' | 'Espèces' | 'Carte' | 'Virement' | 'Chèque'>(() => {
@@ -106,21 +148,44 @@ function CaissePageContent({
   const setSelectedPeriod = propSetSelectedPeriod ?? setInternalSelectedPeriod;
 
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [clients, setClients] = useState<Array<{ id: string; name: string }>>([]);
-  const [employees, setEmployees] = useState<Array<{ id: string; name: string }>>([]);
+  const [clients, setClients] = useState<Array<{ id: string; name: string; tenantId?: string }>>([]);
+  const [catalogServices, setCatalogServices] = useState<CatalogService[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
-  const [formData, setFormData] = useState({
-    type: 'Vente' as Transaction['type'],
-    amount: 0,
-    method: 'Espèces' as Transaction['method'],
-    clientId: '',
-    employeeId: '',
-    note: '',
-    appointmentId: '' // Optional: link to appointment
-  });
+  const [modalMode, setModalMode] = useState<ModalMode>('sale');
+  const [saleForm, setSaleForm] = useState(emptySaleForm);
+  const [movementForm, setMovementForm] = useState(emptyMovementForm);
+  const [amountOverridden, setAmountOverridden] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
+
+  const servicePrice = (s: CatalogService) => s.price ?? s.priceFrom ?? 0;
+
+  const saleSalonId =
+    saleForm.tenantId ||
+    (!isSalonFilterMulti && effectiveSalonIds.length === 1 ? effectiveSalonIds[0] : '');
+
+  const visibleCatalogServices = catalogServices.filter((s) => {
+    if (!saleSalonId) return !isSalonFilterMulti;
+    return !s.tenantId || s.tenantId === saleSalonId;
+  });
+
+  // Clients are per-salon: only those belonging to the sale salon.
+  const visibleClients = !saleSalonId
+    ? []
+    : clients.filter((c) => c.tenantId === saleSalonId);
+
+  const saleSubmitDisabled =
+    !saleForm.clientId ||
+    saleForm.serviceIds.length === 0 ||
+    !saleForm.amount ||
+    saleForm.amount <= 0 ||
+    (isSalonFilterMulti && !saleForm.tenantId);
+
+  const servicesSum = saleForm.serviceIds.reduce((sum, id) => {
+    const s = catalogServices.find((x) => x.id === id);
+    return sum + (s ? servicePrice(s) : 0);
+  }, 0);
 
   // Transform API invoice to Transaction
   const transformInvoiceToTransaction = (invoice: ApiInvoice): Transaction => {
@@ -143,7 +208,6 @@ function CaissePageContent({
       amount = invoice.total;
     }
 
-    // Extract client name
     let clientName: string | undefined;
     if (invoice.client) {
       const firstName = invoice.client.firstName?.trim() || '';
@@ -151,13 +215,20 @@ function CaissePageContent({
       clientName = `${firstName} ${lastName}`.trim() || undefined;
     }
 
-    // Extract employee name
     let employeeName: string | undefined;
     if (invoice.appointment?.employee) {
       const firstName = invoice.appointment.employee.firstName?.trim() || '';
       const lastName = invoice.appointment.employee.lastName?.trim() || '';
       employeeName = `${firstName} ${lastName}`.trim() || undefined;
     }
+
+    const itemNames = (invoice.items || [])
+      .map((item) => (item.quantity > 1 ? `${item.serviceName} x${item.quantity}` : item.serviceName))
+      .filter(Boolean);
+    const servicesLabel =
+      itemNames.length > 0
+        ? itemNames.join(', ')
+        : invoice.appointment?.service?.name || undefined;
 
     return {
       id: invoice.id,
@@ -167,10 +238,21 @@ function CaissePageContent({
       client: clientName,
       employee: employeeName,
       date: new Date(invoice.paidAt || invoice.createdAt),
-      note: invoice.notes || invoice.appointment?.service?.name || undefined,
-      category: invoice.appointment?.service?.name || undefined,
+      note: invoice.notes || servicesLabel || undefined,
+      category: servicesLabel,
       invoiceId: invoice.id
     };
+  };
+
+  const defaultTenantId = () =>
+    !isSalonFilterMulti && effectiveSalonIds.length === 1 ? effectiveSalonIds[0] : '';
+
+  const openSaleModal = () => {
+    setModalMode('sale');
+    setSaleForm({ ...emptySaleForm(), tenantId: defaultTenantId() });
+    setMovementForm({ ...emptyMovementForm(), tenantId: defaultTenantId() });
+    setAmountOverridden(false);
+    setShowModal(true);
   };
 
   // Redirect to login if not authenticated
@@ -185,7 +267,7 @@ function CaissePageContent({
     if (isAuthenticated && !authLoading) {
       fetchData();
     }
-  }, [isAuthenticated, authLoading]);
+  }, [isAuthenticated, authLoading, salonFilterKey]);
 
   const fetchData = async () => {
     // Don't fetch if not authenticated
@@ -268,12 +350,19 @@ function CaissePageContent({
               employeeName = `${firstName} ${lastName}`.trim() || undefined;
             }
 
+            const cashType: Transaction['type'] =
+              ct.type === 'DEPOSIT' ? 'Dépôt' :
+              ct.type === 'REFUND' ? 'Remboursement' :
+              'Retrait';
+            const signedAmount =
+              ct.type === 'DEPOSIT' ? ct.amount : -Math.abs(ct.amount);
+
             return {
               id: ct.id,
-              type: ct.type === 'DEPOSIT' ? 'Dépôt' : 'Retrait',
-              amount: ct.type === 'WITHDRAWAL' ? -ct.amount : ct.amount,
+              type: cashType,
+              amount: signedAmount,
               method: paymentMethodMap[ct.paymentMethod] || 'Espèces',
-              client: undefined, // Cash transactions don't have clients
+              client: undefined,
               employee: employeeName,
               date: new Date(ct.createdAt),
               note: ct.notes || undefined,
@@ -306,21 +395,27 @@ function CaissePageContent({
         toast.success('Aucune transaction trouvée', { id: 'loading-transactions' });
       }
 
-      // Fetch clients
-      const clientsResponse = await api.getClients();
+      // Fetch clients + catalog services (for sale modal)
+      const [clientsResponse, servicesResponse] = await Promise.all([
+        api.getClients(),
+        api.getServices(),
+      ]);
       const clientsData = clientsResponse.clients || [];
       setClients(clientsData.map((c: any) => ({
         id: c.id,
-        name: `${c.firstName} ${c.lastName}`
+        name: `${c.firstName} ${c.lastName}`,
+        tenantId: c.tenantId,
       })));
-
-      // Fetch employees
-      const employeesResponse = await api.getEmployees({ active: true });
-      const employeesData = employeesResponse.employees || [];
-      setEmployees(employeesData.map((e: any) => ({
-        id: e.id,
-        name: `${e.firstName} ${e.lastName}`
-      })));
+      const servicesData = servicesResponse.services || servicesResponse || [];
+      setCatalogServices(
+        (Array.isArray(servicesData) ? servicesData : []).map((s: any) => ({
+          id: s.id,
+          name: s.name,
+          price: s.price ?? null,
+          priceFrom: s.priceFrom ?? null,
+          tenantId: s.tenantId,
+        }))
+      );
     } catch (err: any) {
       console.error('Error fetching caisse data:', err);
       
@@ -434,113 +529,104 @@ function CaissePageContent({
     a.click();
   };
 
-  // Add transaction
+  const toggleSaleService = (serviceId: string) => {
+    setSaleForm((prev) => {
+      const nextIds = prev.serviceIds.includes(serviceId)
+        ? prev.serviceIds.filter((id) => id !== serviceId)
+        : [...prev.serviceIds, serviceId];
+      const nextSum = nextIds.reduce((sum, id) => {
+        const s = catalogServices.find((x) => x.id === id);
+        return sum + (s ? servicePrice(s) : 0);
+      }, 0);
+      return {
+        ...prev,
+        serviceIds: nextIds,
+        amount: amountOverridden ? prev.amount : nextSum,
+      };
+    });
+  };
+
+  // Flow A: vente / Flow B: mouvement caisse
   const handleAddTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!formData.clientId && formData.type === 'Vente') {
-      toast.error('Veuillez sélectionner un client pour une vente');
+
+    if (modalMode === 'sale') {
+      if (isSalonFilterMulti && !saleForm.tenantId) {
+        toast.error('Veuillez sélectionner un salon');
+        return;
+      }
+      if (saleForm.serviceIds.length === 0) {
+        toast.error('Veuillez sélectionner au moins un service');
+        return;
+      }
+      if (!saleForm.clientId?.trim()) {
+        toast.error('Veuillez sélectionner un client');
+        return;
+      }
+      if (!saleForm.amount || saleForm.amount <= 0) {
+        toast.error('Montant invalide');
+        return;
+      }
+
+      try {
+        const loadingToast = toast.loading('Encaissement en cours...');
+        await api.createSale({
+          clientId: saleForm.clientId.trim(),
+          items: saleForm.serviceIds.map((serviceId) => {
+            const s = catalogServices.find((x) => x.id === serviceId);
+            return { serviceId, price: s ? servicePrice(s) : undefined };
+          }),
+          amount: amountOverridden ? Number(saleForm.amount) : undefined,
+          paymentMethod: PAYMENT_METHOD_TO_API[saleForm.method] || 'CASH',
+          notes: saleForm.note || undefined,
+          ...(saleForm.tenantId ? { tenantId: saleForm.tenantId } : {}),
+        });
+        toast.dismiss(loadingToast);
+        toast.success('Vente encaissée');
+        await fetchData();
+        setShowModal(false);
+        setSaleForm(emptySaleForm());
+        setAmountOverridden(false);
+      } catch (err: any) {
+        console.error('Error creating sale:', err);
+        toast.error(err.message || "Erreur lors de l'encaissement");
+      }
+      return;
+    }
+
+    // Flow B — mouvement caisse
+    if (isSalonFilterMulti && !movementForm.tenantId) {
+      toast.error('Veuillez sélectionner un salon');
+      return;
+    }
+    if (!movementForm.amount || movementForm.amount <= 0) {
+      toast.error('Montant invalide');
       return;
     }
 
     try {
-      const loadingToast = toast.loading('Création de la transaction...');
+      const loadingToast = toast.loading('Création du mouvement...');
+      const cashType =
+        movementForm.type === 'Dépôt' ? 'DEPOSIT' :
+        movementForm.type === 'Remboursement' ? 'REFUND' :
+        'WITHDRAWAL';
 
-      const paymentMethodMap: Record<string, 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK' | 'ONLINE'> = {
-        'Espèces': 'CASH',
-        'Carte': 'CARD',
-        'Virement': 'BANK_TRANSFER',
-        'Chèque': 'CHECK'
-      };
+      await api.createCashTransaction({
+        type: cashType,
+        amount: Number(movementForm.amount),
+        paymentMethod: PAYMENT_METHOD_TO_API[movementForm.method] || 'CASH',
+        notes: movementForm.note || undefined,
+        ...(movementForm.tenantId ? { tenantId: movementForm.tenantId } : {}),
+      });
 
-      if (formData.type === 'Vente') {
-        // Create invoice for sale
-        const invoiceData = {
-          clientId: formData.clientId,
-          appointmentId: formData.appointmentId || undefined,
-          amount: Number(formData.amount),
-          tax: 0,
-          paymentMethod: paymentMethodMap[formData.method] || 'CASH',
-          notes: formData.note || undefined
-        };
-
-        const invoice = await api.createInvoice(invoiceData);
-        
-        // Mark as paid immediately
-        await api.updateInvoice(invoice.invoice.id, {
-          status: 'PAID',
-          paymentMethod: paymentMethodMap[formData.method] || 'CASH',
-          paidAt: new Date().toISOString()
-        });
-
-        toast.dismiss(loadingToast);
-        toast.success('Transaction créée avec succès');
-      } else if (formData.type === 'Remboursement') {
-        // For refunds, we need an existing invoice to refund
-        // For now, create a negative invoice (this is a workaround)
-        if (!formData.clientId) {
-          toast.dismiss(loadingToast);
-          toast.error('Veuillez sélectionner un client pour un remboursement');
-          return;
-        }
-
-        const invoiceData = {
-          clientId: formData.clientId,
-          amount: Number(formData.amount),
-          tax: 0,
-          paymentMethod: paymentMethodMap[formData.method] || 'CASH',
-          notes: `Remboursement: ${formData.note || ''}`
-        };
-
-        const invoice = await api.createInvoice(invoiceData);
-        
-        // Mark as refunded
-        await api.updateInvoice(invoice.invoice.id, {
-          status: 'REFUNDED',
-          paymentMethod: paymentMethodMap[formData.method] || 'CASH'
-        });
-
-        toast.dismiss(loadingToast);
-        toast.success('Remboursement créé avec succès');
-      } else if (formData.type === 'Dépôt' || formData.type === 'Retrait') {
-        // Create cash transaction
-        const paymentMethodMap: Record<string, 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK' | 'ONLINE'> = {
-          'Espèces': 'CASH',
-          'Carte': 'CARD',
-          'Virement': 'BANK_TRANSFER',
-          'Chèque': 'CHECK'
-        };
-
-        await api.createCashTransaction({
-          type: formData.type === 'Dépôt' ? 'DEPOSIT' : 'WITHDRAWAL',
-          amount: formData.amount,
-          paymentMethod: paymentMethodMap[formData.method] || 'CASH',
-          notes: formData.note || undefined,
-        });
-
-        toast.dismiss(loadingToast);
-        toast.success(`${formData.type === 'Dépôt' ? 'Dépôt' : 'Retrait'} créé avec succès`);
-      } else {
-        toast.dismiss(loadingToast);
-        toast.error('Type de transaction non supporté');
-        return;
-      }
-
-      // Refresh data
+      toast.dismiss(loadingToast);
+      toast.success(`${movementForm.type} enregistré`);
       await fetchData();
       setShowModal(false);
-      setFormData({ 
-        type: 'Vente', 
-        amount: 0, 
-        method: 'Espèces', 
-        clientId: '', 
-        employeeId: '', 
-        note: '',
-        appointmentId: ''
-      });
+      setMovementForm(emptyMovementForm());
     } catch (err: any) {
-      console.error('Error creating transaction:', err);
-      toast.error(err.message || 'Erreur lors de la création de la transaction');
+      console.error('Error creating cash movement:', err);
+      toast.error(err.message || 'Erreur lors de la création du mouvement');
     }
   };
 
@@ -563,7 +649,7 @@ function CaissePageContent({
   if (loading) {
     return (
       <div className="min-h-screen p-0">
-        <div className="animate-pulse space-y-4 pt-20">
+        <div className="animate-pulse space-y-4">
           <div className="bg-gray-200 h-12 rounded-xl w-1/3"></div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             {[...Array(6)].map((_, i) => (
@@ -623,7 +709,7 @@ function CaissePageContent({
       `}</style>
 
       {/* Header */}
-      <div className="mb-8 pt-20 animate-slideUp">
+      <div className="mb-8 animate-slideUp">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-5xl font-light text-gray-900 tracking-tight mb-2">Caisse</h1>
@@ -638,11 +724,11 @@ function CaissePageContent({
               Exporter
             </button>
             <button
-              onClick={() => setShowModal(true)}
+              onClick={openSaleModal}
               className="px-5 py-2 bg-emerald-600 text-white text-sm font-medium rounded-full hover:bg-emerald-700 transition-colors flex items-center gap-2"
             >
               <Plus size={16} />
-              Ajouter
+              Ajouter une transaction
             </button>
           </div>
         </div>
@@ -707,27 +793,6 @@ function CaissePageContent({
               className="w-full pl-12 pr-4 py-3 rounded-full bg-white border border-gray-200 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all"
             />
           </div>
-          <button
-            onClick={() => { setFormData({ ...formData, type: 'Vente' }); setShowModal(true); }}
-            className="px-4 py-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-full text-xs font-medium transition-colors flex items-center gap-2 whitespace-nowrap"
-          >
-            <Plus size={14} />
-            Nouvelle vente
-          </button>
-          <button
-            onClick={() => { setFormData({ ...formData, type: 'Remboursement' }); setShowModal(true); }}
-            className="px-4 py-3 bg-red-50 hover:bg-red-100 text-red-700 rounded-full text-xs font-medium transition-colors flex items-center gap-2 whitespace-nowrap"
-          >
-            <RefreshCcw size={14} />
-            Remboursement
-          </button>
-          <button
-            onClick={() => { setFormData({ ...formData, type: 'Dépôt' }); setShowModal(true); }}
-            className="px-4 py-3 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-full text-xs font-medium transition-colors flex items-center gap-2 whitespace-nowrap"
-          >
-            <Wallet size={14} />
-            Dépôt
-          </button>
           <button
             onClick={handlePrint}
             className="px-4 py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-full text-xs font-medium transition-colors flex items-center gap-2"
@@ -871,7 +936,20 @@ function CaissePageContent({
                       {tx.employee && tx.employee.trim() ? tx.employee : <span className="text-gray-400">-</span>}
                     </td>
                     <td className="px-6 py-4 text-xs text-gray-400">{tx.date.toLocaleString('fr-FR')}</td>
-                    <td className="px-6 py-4 text-sm text-gray-600">{tx.note || '-'}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600 max-w-xs">
+                      {tx.category || tx.note ? (
+                        <div>
+                          {tx.category && (
+                            <div className="text-gray-800 truncate" title={tx.category}>{tx.category}</div>
+                          )}
+                          {tx.note && tx.note !== tx.category && (
+                            <div className="text-xs text-gray-400 truncate" title={tx.note}>{tx.note}</div>
+                          )}
+                        </div>
+                      ) : (
+                        '-'
+                      )}
+                    </td>
                   </tr>
                 ))
               ) : (
@@ -897,121 +975,346 @@ function CaissePageContent({
         </div>
       </div>
 
-      {/* Modal Add Transaction */}
+      {/* Modal — Flow A vente / Flow B mouvement */}
       {showModal && (
         <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
           <div className="bg-white rounded-lg shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto animate-slideUp">
-            <div className="sticky top-0 bg-white border-b border-gray-100 px-8 py-6 flex items-center justify-between">
-              <h2 className="text-2xl font-light text-gray-900">Nouvelle transaction</h2>
-              <button onClick={() => setShowModal(false)} className="p-2 text-gray-400 hover:text-gray-900 transition-colors">
-                <X size={20} />
-              </button>
-            </div>
-            <form onSubmit={handleAddTransaction} className="px-8 py-6">
-              <div className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                    <Select value={formData.type} onValueChange={v => setFormData({ ...formData, type: v as any })}>
-                      <SelectTrigger className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm mt-2">
-                        <SelectValue placeholder="Sélectionner le type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Vente">Vente</SelectItem>
-                        <SelectItem value="Remboursement">Remboursement</SelectItem>
-                        <SelectItem value="Dépôt">Dépôt</SelectItem>
-                        <SelectItem value="Retrait">Retrait</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Montant</label>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        className="px-4 py-2 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200"
-                        onClick={() => setFormData({ ...formData, amount: Math.max(0, Number(formData.amount) - 10) })}
-                        aria-label="Diminuer le montant"
-                      >
-                        -
-                      </button>
-                      <input
-                        type="number"
-                        value={formData.amount}
-                        onChange={e => setFormData({ ...formData, amount: Number(e.target.value) })}
-                        className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm text-center no-arrows"
-                        required
-                        placeholder="Montant en MAD"
-                        min={0}
-                      />
-                      <button
-                        type="button"
-                        className="px-4 py-2 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200"
-                        onClick={() => setFormData({ ...formData, amount: Number(formData.amount) + 10 })}
-                        aria-label="Augmenter le montant"
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Méthode</label>
-                    <Select value={formData.method} onValueChange={v => setFormData({ ...formData, method: v as any })}>
-                      <SelectTrigger className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm mt-2">
-                        <SelectValue placeholder="Sélectionner la méthode" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Espèces">Espèces</SelectItem>
-                        <SelectItem value="Carte">Carte</SelectItem>
-                        <SelectItem value="Virement">Virement</SelectItem>
-                        <SelectItem value="Chèque">Chèque</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Client {formData.type === 'Vente' || formData.type === 'Remboursement' ? <span className="text-red-500">*</span> : ''}
-                    </label>
-                    <Select 
-                      value={formData.clientId} 
-                      onValueChange={v => setFormData({ ...formData, clientId: v })}
-                    >
-                      <SelectTrigger className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm mt-2">
-                        <SelectValue placeholder="Sélectionner un client" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {clients.map(client => (
-                          <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Employé</label>
-                    <Select 
-                      value={formData.employeeId || 'none'} 
-                      onValueChange={v => setFormData({ ...formData, employeeId: v === 'none' ? '' : v })}
-                    >
-                      <SelectTrigger className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm mt-2">
-                        <SelectValue placeholder="Sélectionner un employé (optionnel)" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Aucun</SelectItem>
-                        {employees.map(employee => (
-                          <SelectItem key={employee.id} value={employee.id}>{employee.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Note</label>
-                    <input type="text" value={formData.note} onChange={e => setFormData({ ...formData, note: e.target.value })} className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm" placeholder="Ajouter une note (optionnel)" />
-                  </div>
-                </div>
+            <div className="sticky top-0 bg-white border-b border-gray-100 px-8 py-5 z-10">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-2xl font-light text-gray-900">
+                  {modalMode === 'sale' ? 'Encaisser une vente' : 'Mouvement caisse'}
+                </h2>
+                <button onClick={() => setShowModal(false)} className="p-2 text-gray-400 hover:text-gray-900 transition-colors">
+                  <X size={20} />
+                </button>
               </div>
+              <div className="flex gap-2 p-1 bg-gray-50 rounded-full">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setModalMode('sale');
+                    setSaleForm((prev) => ({ ...prev, tenantId: prev.tenantId || defaultTenantId() }));
+                    setAmountOverridden(false);
+                  }}
+                  className={`flex-1 px-3 py-2 rounded-full text-xs font-medium transition-colors ${
+                    modalMode === 'sale' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'
+                  }`}
+                >
+                  Encaisser une vente
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setModalMode('movement');
+                    setMovementForm((prev) => ({ ...prev, tenantId: prev.tenantId || defaultTenantId() }));
+                  }}
+                  className={`flex-1 px-3 py-2 rounded-full text-xs font-medium transition-colors ${
+                    modalMode === 'movement' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'
+                  }`}
+                >
+                  Mouvement caisse
+                </button>
+              </div>
+            </div>
+
+            <form onSubmit={handleAddTransaction} className="px-8 py-6">
+              <div className="space-y-5">
+                {isSalonFilterMulti && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Salon *</label>
+                    <Select
+                      value={(modalMode === 'sale' ? saleForm.tenantId : movementForm.tenantId) || undefined}
+                      onValueChange={(v) => {
+                        if (modalMode === 'sale') {
+                          setSaleForm({ ...saleForm, tenantId: v, clientId: '', serviceIds: [] });
+                          setAmountOverridden(false);
+                        } else {
+                          setMovementForm({ ...movementForm, tenantId: v });
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm mt-2">
+                        <SelectValue placeholder="Choisir un salon" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {salons
+                          .filter((s) => effectiveSalonIds.includes(s.id))
+                          .map((s) => (
+                            <SelectItem key={s.id} value={s.id}>
+                              {s.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {modalMode === 'sale' ? (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Services * <span className="text-gray-400 font-normal">({saleForm.serviceIds.length} sélectionné(s))</span>
+                      </label>
+                      <div className="max-h-48 overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 divide-y divide-gray-100">
+                        {visibleCatalogServices.length === 0 ? (
+                          <p className="px-4 py-6 text-sm text-gray-400 text-center">Aucun service dans le catalogue</p>
+                        ) : (
+                          visibleCatalogServices.map((service) => {
+                            const checked = saleForm.serviceIds.includes(service.id);
+                            const price = servicePrice(service);
+                            return (
+                              <label
+                                key={service.id}
+                                className={`flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-white transition-colors ${
+                                  checked ? 'bg-emerald-50/60' : ''
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleSaleService(service.id)}
+                                  className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-600"
+                                />
+                                <span className="flex-1 text-sm text-gray-800">{service.name}</span>
+                                <span className="text-sm text-gray-500 tabular-nums">
+                                  {price > 0 ? `${price.toFixed(2)} MAD` : '—'}
+                                </span>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-sm font-medium text-gray-700">Montant</label>
+                        {amountOverridden && (
+                          <button
+                            type="button"
+                            className="text-xs text-[#002366] hover:underline"
+                            onClick={() => {
+                              setAmountOverridden(false);
+                              setSaleForm({ ...saleForm, amount: servicesSum });
+                            }}
+                          >
+                            Réinitialiser ({servicesSum.toFixed(2)} MAD)
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="px-4 py-2 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200"
+                          onClick={() => {
+                            setAmountOverridden(true);
+                            setSaleForm({ ...saleForm, amount: Math.max(0, Number(saleForm.amount) - 10) });
+                          }}
+                          aria-label="Diminuer le montant"
+                        >
+                          -
+                        </button>
+                        <input
+                          type="number"
+                          value={saleForm.amount}
+                          onChange={(e) => {
+                            setAmountOverridden(true);
+                            setSaleForm({ ...saleForm, amount: Number(e.target.value) });
+                          }}
+                          className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm text-center no-arrows"
+                          required
+                          placeholder="Montant en MAD"
+                          min={0}
+                          step="0.01"
+                        />
+                        <button
+                          type="button"
+                          className="px-4 py-2 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200"
+                          onClick={() => {
+                            setAmountOverridden(true);
+                            setSaleForm({ ...saleForm, amount: Number(saleForm.amount) + 10 });
+                          }}
+                          aria-label="Augmenter le montant"
+                        >
+                          +
+                        </button>
+                      </div>
+                      {!amountOverridden && saleForm.serviceIds.length > 0 && (
+                        <p className="mt-1 text-xs text-gray-400">Somme des services sélectionnés</p>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Méthode *</label>
+                        <Select
+                          value={saleForm.method}
+                          onValueChange={(v) => setSaleForm({ ...saleForm, method: v as Transaction['method'] })}
+                        >
+                          <SelectTrigger className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm mt-2">
+                            <SelectValue placeholder="Méthode" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Espèces">Espèces</SelectItem>
+                            <SelectItem value="Carte">Carte</SelectItem>
+                            <SelectItem value="Virement">Virement</SelectItem>
+                            <SelectItem value="Chèque">Chèque</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Client *
+                        </label>
+                        <Select
+                          value={saleForm.clientId || undefined}
+                          onValueChange={(v) => setSaleForm({ ...saleForm, clientId: v })}
+                        >
+                          <SelectTrigger className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm mt-2">
+                            <SelectValue placeholder={saleSalonId ? 'Choisir un client' : 'Choisir un salon d\'abord'} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {visibleClients.length === 0 ? (
+                              <div className="px-3 py-2 text-sm text-gray-400">Aucun client pour ce salon</div>
+                            ) : (
+                              visibleClients.map((client) => (
+                                <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Note</label>
+                        <input
+                          type="text"
+                          value={saleForm.note}
+                          onChange={(e) => setSaleForm({ ...saleForm, note: e.target.value })}
+                          className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm"
+                          placeholder="Note (sinon noms des services)"
+                        />
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Type *</label>
+                        <Select
+                          value={movementForm.type}
+                          onValueChange={(v) =>
+                            setMovementForm({
+                              ...movementForm,
+                              type: v as 'Dépôt' | 'Retrait' | 'Remboursement',
+                            })
+                          }
+                        >
+                          <SelectTrigger className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm mt-2">
+                            <SelectValue placeholder="Type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Dépôt">Dépôt</SelectItem>
+                            <SelectItem value="Retrait">Retrait</SelectItem>
+                            <SelectItem value="Remboursement">Remboursement</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Montant *</label>
+                        <div className="flex items-center gap-2 mt-2">
+                          <button
+                            type="button"
+                            className="px-4 py-2 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200"
+                            onClick={() =>
+                              setMovementForm({
+                                ...movementForm,
+                                amount: Math.max(0, Number(movementForm.amount) - 10),
+                              })
+                            }
+                            aria-label="Diminuer le montant"
+                          >
+                            -
+                          </button>
+                          <input
+                            type="number"
+                            value={movementForm.amount}
+                            onChange={(e) =>
+                              setMovementForm({ ...movementForm, amount: Number(e.target.value) })
+                            }
+                            className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm text-center no-arrows"
+                            required
+                            placeholder="Montant en MAD"
+                            min={0}
+                            step="0.01"
+                          />
+                          <button
+                            type="button"
+                            className="px-4 py-2 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200"
+                            onClick={() =>
+                              setMovementForm({
+                                ...movementForm,
+                                amount: Number(movementForm.amount) + 10,
+                              })
+                            }
+                            aria-label="Augmenter le montant"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Méthode *</label>
+                        <Select
+                          value={movementForm.method}
+                          onValueChange={(v) =>
+                            setMovementForm({ ...movementForm, method: v as Transaction['method'] })
+                          }
+                        >
+                          <SelectTrigger className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm mt-2">
+                            <SelectValue placeholder="Méthode" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Espèces">Espèces</SelectItem>
+                            <SelectItem value="Carte">Carte</SelectItem>
+                            <SelectItem value="Virement">Virement</SelectItem>
+                            <SelectItem value="Chèque">Chèque</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Note</label>
+                        <input
+                          type="text"
+                          value={movementForm.note}
+                          onChange={(e) => setMovementForm({ ...movementForm, note: e.target.value })}
+                          className="w-full px-4 py-2.5 rounded-full bg-gray-50 border border-gray-200 text-sm"
+                          placeholder="Motif (optionnel)"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-400">
+                      Pas de service requis — dépôt, retrait ou remboursement caisse.
+                    </p>
+                  </>
+                )}
+              </div>
+
               <div className="sticky bottom-0 bg-white border-t border-gray-100 -mx-8 px-8 py-4 mt-6 flex gap-3">
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 px-6 py-2.5 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors">Annuler</button>
-                <button type="submit" className="flex-1 px-6 py-2.5 bg-[#002366] text-white text-sm font-medium rounded-full hover:bg-gray-800 transition-colors">Ajouter</button>
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="flex-1 px-6 py-2.5 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={modalMode === 'sale' && saleSubmitDisabled}
+                  className="flex-1 px-6 py-2.5 bg-[#002366] text-white text-sm font-medium rounded-full hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {modalMode === 'sale' ? 'Encaisser' : 'Enregistrer'}
+                </button>
               </div>
             </form>
           </div>

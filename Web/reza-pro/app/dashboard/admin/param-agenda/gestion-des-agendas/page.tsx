@@ -99,11 +99,12 @@ const transformAgendaToEmployee = (agenda: EmployeeAgenda, existingEmployee?: an
 };
 
 const GestionDesAgendas = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, salons, effectiveSalonIds, isSalonFilterMulti } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [agendas, setAgendas] = useState<EmployeeAgenda[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingAgenda, setEditingAgenda] = useState<EmployeeAgenda | null>(null);
+  const [createTenantId, setCreateTenantId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [loading, setLoading] = useState(true);
@@ -200,7 +201,8 @@ const GestionDesAgendas = () => {
           allowOnlineBooking: agenda.allowOnlineBooking,
           status: agenda.status
         },
-        serviceIds: originalEmployee.employeeServices?.map((es: any) => es.serviceId) || []
+        serviceIds: originalEmployee.employeeServices?.map((es: any) => es.serviceId) || [],
+        ...(originalEmployee.tenantId ? { tenantId: originalEmployee.tenantId } : {}),
       };
       
       // Only include email if it's a valid non-empty email
@@ -223,6 +225,10 @@ const GestionDesAgendas = () => {
 
   const handleSaveAgenda = async (agenda: EmployeeAgenda) => {
     try {
+      if (!editingAgenda && isSalonFilterMulti && !createTenantId) {
+        toast.error('Veuillez sélectionner un salon');
+        return;
+      }
       const loadingToast = toast.loading(editingAgenda ? 'Modification de l\'agenda...' : 'Création de l\'agenda...');
       
       if (editingAgenda) {
@@ -247,17 +253,20 @@ const GestionDesAgendas = () => {
         const transformedAgendas = employeesResponse.employees.map(transformEmployeeToAgenda);
         setAgendas(transformedAgendas);
       } else {
-        // Create new employee
+        // Create new employee — services must belong to target salon when multi
         const employeeData = transformAgendaToEmployee(agenda);
-        
-        // Get service IDs from service names
-        const serviceIds = services
+        const scopedServices =
+          createTenantId
+            ? services.filter((s) => !s.tenantId || s.tenantId === createTenantId)
+            : services;
+        const serviceIds = scopedServices
           .filter(s => agenda.services.includes(s.name))
           .map(s => s.id);
         
         const response = await api.createEmployee({
           ...employeeData,
-          serviceIds
+          serviceIds,
+          ...(createTenantId ? { tenantId: createTenantId } : {}),
         });
         
         const newAgenda = transformEmployeeToAgenda(response.employee);
@@ -268,6 +277,7 @@ const GestionDesAgendas = () => {
       toast.success(editingAgenda ? 'Agenda modifié avec succès' : 'Agenda créé avec succès');
       setShowModal(false);
       setEditingAgenda(null);
+      setCreateTenantId('');
     } catch (err: any) {
       toast.dismiss();
       toast.error(err.message || 'Erreur lors de l\'enregistrement de l\'agenda');
@@ -325,7 +335,7 @@ const GestionDesAgendas = () => {
       `}</style>
 
       {/* Header */}
-      <div className="mb-8 animate-slideUp pt-20">
+      <div className="mb-8 animate-slideUp">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
           <div>
             <h1 className="text-4xl md:text-5xl font-light text-gray-900 tracking-tight mb-2">
@@ -339,6 +349,7 @@ const GestionDesAgendas = () => {
           <button
             onClick={() => {
               setEditingAgenda(null);
+              setCreateTenantId('');
               setShowModal(true);
             }}
             className="px-5 py-2 bg-[#002366] text-white text-sm font-medium rounded-full hover:bg-gray-800 transition-colors shadow-sm"
@@ -410,12 +421,21 @@ const GestionDesAgendas = () => {
       {showModal && (
         <AgendaModal
           agenda={editingAgenda}
-          services={services}
+          services={
+            !editingAgenda && createTenantId
+              ? services.filter((s) => !s.tenantId || s.tenantId === createTenantId)
+              : services
+          }
           onClose={() => {
             setShowModal(false);
             setEditingAgenda(null);
+            setCreateTenantId('');
           }}
           onSave={handleSaveAgenda}
+          createTenantId={createTenantId}
+          onCreateTenantIdChange={setCreateTenantId}
+          showSalonPicker={!editingAgenda && isSalonFilterMulti}
+          salonOptions={salons.filter((s) => effectiveSalonIds.includes(s.id))}
         />
       )}
 
@@ -633,11 +653,24 @@ const AgendaCard = ({ agenda, onEdit, onDelete, onDuplicate }: {
 };
 
 // Agenda Modal Component
-const AgendaModal = ({ agenda, services, onClose, onSave }: {
+const AgendaModal = ({
+  agenda,
+  services,
+  onClose,
+  onSave,
+  createTenantId = '',
+  onCreateTenantIdChange,
+  showSalonPicker = false,
+  salonOptions = [],
+}: {
   agenda: EmployeeAgenda | null;
   services: any[];
   onClose: () => void;
   onSave: (agenda: EmployeeAgenda) => void;
+  createTenantId?: string;
+  onCreateTenantIdChange?: (id: string) => void;
+  showSalonPicker?: boolean;
+  salonOptions?: Array<{ id: string; name: string }>;
 }) => {
   const [formData, setFormData] = useState<EmployeeAgenda>(
     agenda ? {
@@ -665,6 +698,10 @@ const AgendaModal = ({ agenda, services, onClose, onSave }: {
   const [showColorPicker, setShowColorPicker] = useState(false);
 
   const handleSubmit = () => {
+    if (showSalonPicker && !createTenantId) {
+      toast.error('Veuillez sélectionner un salon');
+      return;
+    }
     if (!formData.name) {
       toast.error('Veuillez remplir le nom');
       return;
@@ -747,6 +784,28 @@ const AgendaModal = ({ agenda, services, onClose, onSave }: {
           {/* Info Tab */}
           {activeTab === 'info' && (
             <div className="space-y-6">
+              {showSalonPicker && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Salon <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={createTenantId}
+                    onChange={(e) => {
+                      onCreateTenantIdChange?.(e.target.value);
+                      setFormData((prev) => ({ ...prev, services: [] }));
+                    }}
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-full focus:outline-none focus:ring-2 focus:ring-gray-900"
+                  >
+                    <option value="">Choisir un salon</option>
+                    {salonOptions.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">

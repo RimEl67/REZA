@@ -3,6 +3,7 @@
 import { Suspense } from 'react';
 import Sidebar from '@/components/Sidebar';
 import ProtectedRoute from '@/components/ProtectedRoute';
+import PaywallModal from '@/components/PaywallModal';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,9 +23,11 @@ export default function DashboardLayout({
             .sidebar { display: none !important; }
           }
         `}</style>
-        <main className="flex-1 p-8">
+        {/* pt-28 = fixed Sidebar topbar (h-20) + former p-8 top spacing */}
+        <main className="flex-1 px-8 pb-8 pt-28">
           {children}
         </main>
+        <PaywallModal />
       </div>
     </ProtectedRoute>
   );

@@ -6,6 +6,7 @@ import { Sketch } from '@uiw/react-color';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Checkbox } from "@/components/ui/checkbox";
 import { api } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 import toast from 'react-hot-toast';
 
 // API Service type (from backend)
@@ -110,12 +111,14 @@ function applyRangePriceChange(
 }
 
 const GestionPrestations = () => {
+  const { salons, effectiveSalonIds, isSalonFilterMulti } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [services, setServices] = useState<Service[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [employees, setEmployees] = useState<Array<{ id: string; firstName: string; lastName: string }>>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingService, setEditingService] = useState<Service | null>(null);
+  const [createTenantId, setCreateTenantId] = useState('');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
@@ -468,7 +471,7 @@ const GestionPrestations = () => {
       `}</style>
 
       {/* Header */}
-      <div className="mb-8 pt-20">
+      <div className="mb-8">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
           <div>
             <h1 className="text-4xl md:text-5xl font-light text-gray-900 tracking-tight mb-2">
@@ -490,6 +493,7 @@ const GestionPrestations = () => {
             <button
               onClick={() => {
                 setEditingService(null);
+                setCreateTenantId('');
                 setShowModal(true);
               }}
               className="px-5 py-2 bg-[#002366] text-white text-sm font-medium rounded-full hover:bg-gray-800 transition-colors shadow-sm"
@@ -619,11 +623,23 @@ const GestionPrestations = () => {
           onClose={() => {
             setShowModal(false);
             setEditingService(null);
+            setCreateTenantId('');
           }}
+          createTenantId={createTenantId}
+          onCreateTenantIdChange={setCreateTenantId}
+          showSalonPicker={!editingService && isSalonFilterMulti}
+          salonOptions={salons.filter((s) => effectiveSalonIds.includes(s.id))}
           onSave={async (service) => {
             try {
+              if (!editingService && isSalonFilterMulti && !createTenantId) {
+                toast.error('Veuillez sélectionner un salon');
+                return;
+              }
               const loadingToast = toast.loading(editingService ? 'Modification de la prestation...' : 'Création de la prestation...');
-              const apiData = transformToApiService(service);
+              const apiData = {
+                ...transformToApiService(service),
+                ...(!editingService && createTenantId ? { tenantId: createTenantId } : {}),
+              };
               if (editingService) {
                 await api.updateService(editingService.id, apiData);
                 toast.dismiss(loadingToast);
@@ -636,6 +652,7 @@ const GestionPrestations = () => {
               await fetchData();
               setShowModal(false);
               setEditingService(null);
+              setCreateTenantId('');
             } catch (err: any) {
               console.error('Error saving service:', err);
               toast.error(err.message || 'Erreur lors de l\'enregistrement de la prestation');
@@ -901,12 +918,26 @@ const ServiceCard = ({ service, onEdit, onDelete, onDuplicate }: {
 };
 
 // Service Modal Component
-const ServiceModal = ({ service, categories, employees, onClose, onSave }: {
+const ServiceModal = ({
+  service,
+  categories,
+  employees,
+  onClose,
+  onSave,
+  createTenantId = '',
+  onCreateTenantIdChange,
+  showSalonPicker = false,
+  salonOptions = [],
+}: {
   service: Service | null;
   categories: string[];
   employees: Array<{ id: string; firstName: string; lastName: string }>;
   onClose: () => void;
   onSave: (service: Service) => void;
+  createTenantId?: string;
+  onCreateTenantIdChange?: (id: string) => void;
+  showSalonPicker?: boolean;
+  salonOptions?: Array<{ id: string; name: string }>;
 }) => {
   const [formData, setFormData] = useState<Service>(
     service || {
@@ -955,6 +986,10 @@ const ServiceModal = ({ service, categories, employees, onClose, onSave }: {
   }, [service, categories]);
 
   const handleSubmit = () => {
+    if (showSalonPicker && !createTenantId) {
+      toast.error('Veuillez sélectionner un salon');
+      return;
+    }
     if (!formData.name || !formData.category) {
       toast.error('Veuillez remplir tous les champs obligatoires (Nom et Catégorie)');
       return;
@@ -1037,6 +1072,25 @@ const ServiceModal = ({ service, categories, employees, onClose, onSave }: {
             </div>
 
             <div className="space-y-4">
+              {showSalonPicker && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Salon <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={createTenantId}
+                    onChange={(e) => onCreateTenantIdChange?.(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-gray-200 rounded-full focus:outline-none focus:ring-2 focus:ring-gray-900"
+                  >
+                    <option value="">Choisir un salon</option>
+                    {salonOptions.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Nom <span className="text-red-500">*</span>

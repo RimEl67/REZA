@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../constants.dart';
-import '../providers/auth_provider.dart';
+import '../viewmodels/auth_viewmodel.dart';
 import '../services/account_service.dart';
 import '../services/api_client.dart';
 import '../services/session_store.dart';
@@ -13,7 +13,7 @@ class ProfileScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
+    final auth = context.watch<AuthViewModel>();
     final user = auth.user;
 
     if (!auth.isAuthenticated || user == null) {
@@ -125,7 +125,7 @@ class ProfileScreen extends StatelessWidget {
                             TextButton(
                               onPressed: () async {
                                 Navigator.pop(context);
-                                await context.read<AuthProvider>().logout();
+                                await context.read<AuthViewModel>().logout();
                               },
                               child: Text('Déconnecter', style: GoogleFonts.inter(color: const Color(0xFFEF4444), fontWeight: FontWeight.w600)),
                             ),
@@ -200,7 +200,7 @@ class ProfileScreen extends StatelessWidget {
                 );
                 await sessionStore.save(updated);
                 if (!context.mounted) return;
-                await context.read<AuthProvider>().refreshFromStore();
+                await context.read<AuthViewModel>().refreshFromStore();
                 if (!ctx.mounted) return;
                 Navigator.pop(ctx);
                 if (!context.mounted) return;

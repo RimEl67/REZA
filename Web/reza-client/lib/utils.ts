@@ -310,36 +310,34 @@ export const MOROCCAN_CITIES = [
 ] as const;
 
 /**
- * Convert relative image path to full URL pointing to backend
- * Handles both relative paths (/uploads/...) and full URLs (http://...)
+ * Normalize image path for <img src>.
+ * - https:// Unsplash/CDN: unchanged
+ * - /uploads/... : same-origin relative (Next rewrite → backend)
+ * - absolute API hosts with /uploads/... : strip to relative for rewrite
  */
 export function getImageUrl(imagePath: string | null | undefined): string {
   if (!imagePath) return '';
-  
-  // Convert to string to ensure it's a string type
+
   const imagePathStr = String(imagePath);
-  
-  // If already a full URL (http:// or https://), return as-is
+
+  // Absolute URL that points at our upload tree → relative for Next /uploads rewrite
+  const uploadOnHost = imagePathStr.match(
+    /^https?:\/\/(?:localhost:5000|127\.0\.0\.1:5000|api\.wellbe\.ma)(\/uploads\/.+)$/i
+  );
+  if (uploadOnHost) {
+    return uploadOnHost[1];
+  }
+
+  // External absolute URLs (Unsplash, etc.)
   if (imagePathStr.startsWith('http://') || imagePathStr.startsWith('https://')) {
     return imagePathStr;
   }
-  
-  // If it's a relative path starting with /uploads, convert to backend URL
-  if (imagePathStr.startsWith('/uploads/')) {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-    // Remove /api from the end if present, then add the image path
-    const baseUrl = apiUrl.replace(/\/api$/, '');
-    return `${baseUrl}${imagePathStr}`;
-  }
-  
-  // If it starts with /, assume it's a relative path from root
+
+  // Relative paths — keep same-origin; next.config rewrites /uploads → backend
   if (imagePathStr.startsWith('/')) {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-    const baseUrl = apiUrl.replace(/\/api$/, '');
-    return `${baseUrl}${imagePathStr}`;
+    return imagePathStr;
   }
-  
-  // Otherwise, return as-is (might be a relative path that needs to be handled differently)
+
   return imagePathStr;
 }
 

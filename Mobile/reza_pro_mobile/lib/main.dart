@@ -1,51 +1,110 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'screens/login_screen.dart';
-import 'screens/dashboard_screen.dart';
-import 'constants/app_colors.dart';
-
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:provider/provider.dart';
+import 'constants/app_colors.dart';
+import 'viewmodels/auth_viewmodel.dart';
+import 'screens/dashboard_screen.dart';
+import 'screens/login_screen.dart';
 
 void main() {
   initializeDateFormatting('fr_FR', null).then((_) {
-    runApp(const WellBeProApp());
+    runApp(const RezaProApp());
   });
 }
 
-class WellBeProApp extends StatelessWidget {
-  const WellBeProApp({super.key});
+class RezaProApp extends StatelessWidget {
+  const RezaProApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'WellBePro',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: AppColors.primary,
-          primary: AppColors.primary,
-          surface: Colors.white,
-        ),
-        scaffoldBackgroundColor: Colors.white,
-        // Outfit font globally — matching the Agenda page reference style
-        textTheme: GoogleFonts.outfitTextTheme(),
-        appBarTheme: AppBarTheme(
-          backgroundColor: Colors.white,
-          foregroundColor: AppColors.textDark,
-          elevation: 0,
-          centerTitle: true,
-          titleTextStyle: GoogleFonts.outfit(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textDark,
+    return ChangeNotifierProvider(
+      create: (_) => AuthViewModel(),
+      child: MaterialApp(
+        title: 'Reza Pro',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          useMaterial3: true,
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: AppColors.primary,
+            primary: AppColors.primary,
+            surface: Colors.white,
+          ),
+          scaffoldBackgroundColor: Colors.white,
+          textTheme: GoogleFonts.outfitTextTheme(),
+          appBarTheme: AppBarTheme(
+            backgroundColor: Colors.white,
+            foregroundColor: AppColors.textDark,
+            elevation: 0,
+            centerTitle: true,
+            titleTextStyle: GoogleFonts.outfit(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textDark,
+            ),
           ),
         ),
+        home: const _AuthGate(),
+        routes: {
+          '/login': (context) => const LoginScreen(),
+          '/dashboard': (context) => const DashboardScreen(),
+        },
       ),
-      initialRoute: '/login',
-      routes: {
-        '/login': (context) => const LoginScreen(),
-        '/dashboard': (context) => const DashboardScreen(),
+    );
+  }
+}
+
+class _AuthGate extends StatelessWidget {
+  const _AuthGate();
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<AuthViewModel>(
+      builder: (context, auth, _) {
+        if (auth.isBooting) {
+          return Scaffold(
+            backgroundColor: Colors.white,
+            body: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Icon(Icons.spa_rounded, color: Colors.white, size: 36),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Reza Pro',
+                    style: GoogleFonts.outfit(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 3,
+                      color: AppColors.primary,
+                      backgroundColor: AppColors.primary.withOpacity(0.15),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+        if (auth.isAuthenticated) {
+          return const DashboardScreen();
+        }
+        return const LoginScreen();
       },
     );
   }

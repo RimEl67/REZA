@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import '../constants/app_colors.dart';
+import '../viewmodels/auth_viewmodel.dart';
+import '../services/api_client.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -14,7 +17,6 @@ class _LoginScreenState extends State<LoginScreen>
   bool _isLogin = true;
   bool _showPassword = false;
   bool _showConfirmPassword = false;
-  bool _keepLoggedIn = false;
   bool _acceptTerms = false;
   bool _loading = false;
   String _error = '';
@@ -86,7 +88,12 @@ class _LoginScreenState extends State<LoginScreen>
     super.dispose();
   }
 
-  void _handleSubmit() {
+  Future<void> _handleSubmit() async {
+    if (!_isLogin) {
+      setState(() => _error = 'Inscription staff: contactez le support');
+      return;
+    }
+
     final email = _emailController.text.trim();
     final password = _passwordController.text;
 
@@ -98,18 +105,19 @@ class _LoginScreenState extends State<LoginScreen>
     }
 
     setState(() => _loading = true);
-
-    Future.delayed(const Duration(milliseconds: 1500), () {
+    try {
+      await context.read<AuthViewModel>().login(email, password);
       if (!mounted) return;
-      setState(() => _loading = false);
-
-      // Mock credentials
-      if (email == 'admin@wellbe.ma' && password == 'admin123') {
-        Navigator.of(context).pushReplacementNamed('/dashboard');
-      } else {
-        setState(() => _error = 'Email ou mot de passe invalide');
-      }
-    });
+      Navigator.of(context).pushReplacementNamed('/dashboard');
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.message);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'Connexion impossible. Vérifiez le serveur.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
@@ -147,7 +155,7 @@ class _LoginScreenState extends State<LoginScreen>
             ),
             const SizedBox(height: 24),
             Text(
-              'WellBePro',
+              'Reza Pro',
               style: GoogleFonts.outfit(
                 fontSize: 26,
                 fontWeight: FontWeight.w800,
@@ -252,7 +260,7 @@ class _LoginScreenState extends State<LoginScreen>
                     ),
                     const SizedBox(width: 12),
                     Text(
-                      'WellBePro',
+                      'Reza Pro',
                       style: GoogleFonts.outfit(
                         fontSize: 22,
                         fontWeight: FontWeight.w800,
@@ -345,10 +353,23 @@ class _LoginScreenState extends State<LoginScreen>
                 ),
               ),
               GestureDetector(
-                onTap: () => setState(() {
-                  _isLogin = !_isLogin;
-                  _error = '';
-                }),
+                onTap: () {
+                  if (_isLogin) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Contactez le support',
+                            style: GoogleFonts.outfit(fontSize: 13)),
+                        backgroundColor: AppColors.primary,
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                    return;
+                  }
+                  setState(() {
+                    _isLogin = true;
+                    _error = '';
+                  });
+                },
                 child: Text(
                   _isLogin ? 'S\'inscrire' : 'Se connecter',
                   style: GoogleFonts.outfit(
@@ -461,42 +482,19 @@ class _LoginScreenState extends State<LoginScreen>
             ),
 
           if (_isLogin)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    Checkbox(
-                      value: _keepLoggedIn,
-                      onChanged: (v) => setState(() => _keepLoggedIn = v ?? false),
-                      activeColor: AppColors.primary,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    Text(
-                      'Rester connecté',
-                      style: GoogleFonts.outfit(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textGray,
-                      ),
-                    ),
-                  ],
-                ),
-                TextButton(
-                  onPressed: () {},
-                  child: Text(
-                    'Mot de passe oublié ?',
-                    style: GoogleFonts.outfit(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textDark,
-                    ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () {},
+                child: Text(
+                  'Mot de passe oublié ?',
+                  style: GoogleFonts.outfit(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textDark,
                   ),
                 ),
-              ],
+              ),
             )
           else
             Row(
@@ -652,7 +650,7 @@ class _LoginScreenState extends State<LoginScreen>
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Email: admin@wellbe.ma\nMot de passe: admin123',
+                  'Email: admin@wellbepro.com\nMot de passe: password123',
                   style: GoogleFonts.outfit(
                     fontSize: 12,
                     color: AppColors.textGray,

@@ -95,33 +95,113 @@ function LuxurySearchResultsContent() {
 	});
 
 	const mapRef = useRef<HTMLDivElement | null>(null);
-	const googleMapRef = useRef<any>(null);
+	const leafletMapRef = useRef<any>(null);
+	const markersLayerRef = useRef<any>(null);
 	const markersRef = useRef<any[]>([]);
+	const hasFitBoundsOnceRef = useRef(false);
+	const [mapReady, setMapReady] = useState(false);
 	const router = useRouter();
 	const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
 	const [geoLoading, setGeoLoading] = useState(false);
+	/** null = not decided, true = prompt visible, false = dismissed this session */
+	const [showGeoPrompt, setShowGeoPrompt] = useState<boolean | null>(null);
 
-	const requestUserLocation = () => {
-		if (!navigator.geolocation) {
-			setUserLocation({ lat: 33.5731, lng: -7.6298 });
-			return;
+	const geoErrorCodeName = (code: number): string => {
+		switch (code) {
+			case 1:
+				return 'PERMISSION_DENIED';
+			case 2:
+				return 'POSITION_UNAVAILABLE';
+			case 3:
+				return 'TIMEOUT';
+			default:
+				return `UNKNOWN_${code}`;
 		}
-		setGeoLoading(true);
-		navigator.geolocation.getCurrentPosition(
-			(position) => {
+	};
+
+	const dismissGeoSilently = () => {
+		setShowGeoPrompt(false);
+		try {
+			sessionStorage.setItem('reza_geo_prompt_dismissed', '1');
+		} catch {
+			/* ignore */
+		}
+	};
+
+	const getPositionOnce = (
+		options: PositionOptions
+	): Promise<GeolocationPosition> =>
+		new Promise((resolve, reject) => {
+			navigator.geolocation.getCurrentPosition(resolve, reject, options);
+		});
+
+	/**
+	 * Ask browser for GPS. On deny/fail → silent: keep null (ALL salons, no km), hide prompt.
+	 * No Casablanca fake coordinates. No error banner.
+	 */
+	const requestUserLocation = (): Promise<boolean> => {
+		return (async () => {
+			if (typeof navigator === 'undefined' || !navigator.geolocation) {
+				setUserLocation(null);
+				dismissGeoSilently();
+				return false;
+			}
+
+			setGeoLoading(true);
+
+			const primary: PositionOptions = {
+				enableHighAccuracy: false,
+				timeout: 15_000,
+				maximumAge: 60_000,
+			};
+			const retry: PositionOptions = {
+				enableHighAccuracy: true,
+				timeout: 15_000,
+				maximumAge: 0,
+			};
+
+			try {
+				let position: GeolocationPosition;
+				try {
+					position = await getPositionOnce(primary);
+				} catch (firstErr: unknown) {
+					const first = firstErr as GeolocationPositionError;
+					// Code 2 often succeeds on flip (desktop Wi‑Fi vs high-accuracy)
+					if (first?.code === 2) {
+						position = await getPositionOnce(retry);
+					} else {
+						throw firstErr;
+					}
+				}
+
 				setUserLocation({
 					lat: position.coords.latitude,
 					lng: position.coords.longitude,
 				});
 				setGeoLoading(false);
-			},
-			(error) => {
-				console.warn('Geolocation error:', error);
-				setUserLocation({ lat: 33.5731, lng: -7.6298 });
+				setShowGeoPrompt(false);
+				try {
+					sessionStorage.setItem('reza_geo_granted', '1');
+					sessionStorage.removeItem('reza_geo_prompt_dismissed');
+				} catch {
+					/* ignore */
+				}
+				return true;
+			} catch (err: unknown) {
+				const error = err as GeolocationPositionError;
+				const code = typeof error?.code === 'number' ? error.code : -1;
+				if (process.env.NODE_ENV === 'development') {
+					console.warn(
+						`Geolocation error: ${geoErrorCodeName(code)}`,
+						error?.message || '(empty browser message)'
+					);
+				}
+				setUserLocation(null);
 				setGeoLoading(false);
-			},
-			{ timeout: 5000, enableHighAccuracy: false }
-		);
+				dismissGeoSilently();
+				return false;
+			}
+		})();
 	};
 
 	// Calculate distance between two coordinates using Haversine formula
@@ -153,9 +233,22 @@ function LuxurySearchResultsContent() {
 		}
 	}, [searchParams]);
 
-	// Get user's location on mount
+	// Location ask: show soft prompt on search (don't fake Casablanca coords).
+	// Auto-retry only if user already granted earlier this session.
 	useEffect(() => {
-		requestUserLocation();
+		try {
+			if (sessionStorage.getItem('reza_geo_prompt_dismissed') === '1') {
+				setShowGeoPrompt(false);
+				return;
+			}
+			if (sessionStorage.getItem('reza_geo_granted') === '1') {
+				requestUserLocation();
+				return;
+			}
+		} catch {
+			/* ignore */
+		}
+		setShowGeoPrompt(true);
 	}, []);
 
 	// Fetch tenants from API
@@ -350,8 +443,10 @@ function LuxurySearchResultsContent() {
 
 	const filteredResults = getFilteredResults();
 
-	// Helper function to get distance for display
+	// Distance / km only when real GPS granted — never without userLocation
 	const getDistanceForDisplay = (salon: any): string | null => {
+		if (!userLocation) return null;
+
 		if (salon.distanceKm != null) {
 			const distance = salon.distanceKm as number;
 			return distance < 1
@@ -359,9 +454,7 @@ function LuxurySearchResultsContent() {
 				: `${distance.toFixed(1)} km`;
 		}
 
-		if (!userLocation || !salon.coordinates || !salon.coordinates.lat || !salon.coordinates.lng) {
-			return salon.distance || null;
-		}
+		if (!salon.coordinates?.lat || !salon.coordinates?.lng) return null;
 
 		const distance = calculateDistance(
 			userLocation.lat,
@@ -373,6 +466,10 @@ function LuxurySearchResultsContent() {
 		return distance < 1
 			? `${Math.round(distance * 1000)} m`
 			: `${distance.toFixed(1)} km`;
+	};
+
+	const dismissGeoPrompt = () => {
+		dismissGeoSilently();
 	};
 
 	// Helper function to get today's hours for a salon
@@ -428,248 +525,196 @@ function LuxurySearchResultsContent() {
 		loadFavorites();
 	}, [isAuthenticated, user?.email]);
 
-	const loadGoogleMaps = (apiKey?: string) =>
-		new Promise<void>((resolve, reject) => {
-			if (!apiKey) {
-				reject(new Error('Missing Google Maps API key'));
-				return;
-			}
-			if ((window as any).google && (window as any).google.maps) {
-				resolve();
-				return;
-			}
-			if (document.querySelector(`script[data-google-maps]`)) {
-				const checkInterval = setInterval(() => {
-					if ((window as any).google && (window as any).google.maps) {
-						clearInterval(checkInterval);
-						resolve();
-					}
-				}, 100);
-				return;
-			}
-			const script = document.createElement('script');
-			script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
-			script.async = true;
-			script.defer = true;
-			script.setAttribute('data-google-maps', 'true');
-			script.onload = () => resolve();
-			script.onerror = (err) => reject(err);
-			document.head.appendChild(script);
-		});
-
+	// Leaflet map (OSM tiles) — no Google API key required
 	useEffect(() => {
-		let mounted = true;
-		const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+		let disposed = false;
+		let map: any = null;
 
-		if (!mapRef.current || !apiKey) {
-			console.warn('Google Maps API key not found. Map features will be disabled.');
-			return;
-		}
+		(async () => {
+			if (!mapRef.current) return;
+			const L = (await import('leaflet')).default;
+			// @ts-expect-error leaflet CSS side-effect import
+			await import('leaflet/dist/leaflet.css');
+			if (disposed || !mapRef.current) return;
 
-		loadGoogleMaps(apiKey)
-			.then(() => {
-				if (!mounted) return;
-				const google = (window as any).google;
-				
-				// Calculate center from results or use default (Casablanca)
-				let center = { lat: 33.5731, lng: -7.6298 };
-				if (results.length > 0) {
-					const validCoords = results.filter(r => r.coordinates && r.coordinates.lat && r.coordinates.lng);
-					if (validCoords.length > 0) {
-						const avgLat = validCoords.reduce((sum, r) => sum + r.coordinates.lat, 0) / validCoords.length;
-						const avgLng = validCoords.reduce((sum, r) => sum + r.coordinates.lng, 0) / validCoords.length;
-						center = { lat: avgLat, lng: avgLng };
-					}
+			const defaultCenter: [number, number] = [33.5731, -7.6298];
+			map = L.map(mapRef.current, {
+				zoomControl: false,
+				attributionControl: true,
+			}).setView(defaultCenter, 13);
+
+			L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+				attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+				maxZoom: 19,
+			}).addTo(map);
+
+			const layer = L.layerGroup().addTo(map);
+			if (disposed) {
+				map.remove();
+				return;
+			}
+
+			markersLayerRef.current = layer;
+			leafletMapRef.current = map;
+			setMapReady(true);
+
+			// Sticky panel: tiles need invalidateSize after layout settles
+			requestAnimationFrame(() => {
+				try {
+					map.invalidateSize();
+				} catch {
+					/* ignore */
 				}
-				
-				googleMapRef.current = new google.maps.Map(mapRef.current, {
-					center,
-					zoom: results.length > 0 ? 12 : 13,
-					disableDefaultUI: true,
-					styles: [
-						{ elementType: "geometry", stylers: [{ color: "#f5f5f5" }] },
-						{ elementType: "labels.icon", stylers: [{ visibility: "off" }] },
-						{ elementType: "labels.text.fill", stylers: [{ color: "#616161" }] },
-						{ elementType: "labels.text.stroke", stylers: [{ color: "#f5f5f5" }] },
-						{ featureType: "administrative.land_parcel", elementType: "labels.text.fill", stylers: [{ color: "#bdbdbd" }] },
-						{ featureType: "poi", elementType: "geometry", stylers: [{ color: "#eeeeee" }] },
-						{ featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#757575" }] },
-						{ featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#e5e5e5" }] },
-						{ featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ color: "#9e9e9e" }] },
-						{ featureType: "road", elementType: "geometry", stylers: [{ color: "#ffffff" }] },
-						{ featureType: "road.arterial", elementType: "labels.text.fill", stylers: [{ color: "#757575" }] },
-						{ featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#dadada" }] },
-						{ featureType: "road.highway", elementType: "labels.text.fill", stylers: [{ color: "#616161" }] },
-						{ featureType: "road.local", elementType: "labels.text.fill", stylers: [{ color: "#9e9e9e" }] },
-						{ featureType: "transit.line", elementType: "geometry", stylers: [{ color: "#e5e5e5" }] },
-						{ featureType: "transit.station", elementType: "geometry", stylers: [{ color: "#eeeeee" }] },
-						{ featureType: "water", elementType: "geometry", stylers: [{ color: "#c9c9c9" }] },
-						{ featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#9e9e9e" }] }
-					],
-				});
-
-				// Initial markers will be set by the filteredResults effect
-			})
-			.catch(() => {});
+			});
+			window.setTimeout(() => {
+				try {
+					map?.invalidateSize();
+				} catch {
+					/* ignore */
+				}
+			}, 150);
+		})();
 
 		return () => {
-			mounted = false;
-			if (markersRef.current.length) {
-				markersRef.current.forEach((m) => {
-					if (m.marker) m.marker.setMap(null);
-					if (m.infowindow) m.infowindow.close();
-				});
-				markersRef.current = [];
+			disposed = true;
+			setMapReady(false);
+			hasFitBoundsOnceRef.current = false;
+			markersRef.current = [];
+			markersLayerRef.current = null;
+			leafletMapRef.current = null;
+			if (map) {
+				try {
+					map.remove();
+				} catch {
+					/* ignore */
+				}
 			}
-			googleMapRef.current = null;
+			// Strict Mode remount: clear Leaflet leftover on same DOM node
+			if (mapRef.current) {
+				mapRef.current.innerHTML = '';
+				delete (mapRef.current as any)._leaflet_id;
+			}
 		};
 	}, []);
 
+	// Reflow map when mobile carte toggle / sticky panel size changes
+	useEffect(() => {
+		const map = leafletMapRef.current;
+		if (!map || !mapReady) return;
+		const t = window.setTimeout(() => {
+			try {
+				map.invalidateSize();
+			} catch {
+				/* ignore */
+			}
+		}, 50);
+		return () => window.clearTimeout(t);
+	}, [showMobileMap, mapReady]);
+
 	// Update map markers when filtered results change
 	useEffect(() => {
-		const google = (window as any).google;
-		if (!google || !googleMapRef.current || loading) return;
+		if (!mapReady || loading) return;
+		const map = leafletMapRef.current;
+		const layer = markersLayerRef.current;
+		if (!map || !layer) return;
 
-		// Clear existing markers
-		markersRef.current.forEach((m) => {
-			if (m.marker) m.marker.setMap(null);
-			if (m.infowindow) m.infowindow.close();
-		});
-		markersRef.current = [];
+		let cancelled = false;
 
-		// Add new markers from filtered results
-		markersRef.current = filteredResults.map((salon) => {
-			// Use default center if no coordinates available
+		(async () => {
+			const L = (await import('leaflet')).default;
+			if (cancelled || !leafletMapRef.current || !markersLayerRef.current) return;
+
+			markersLayerRef.current.clearLayers();
+			markersRef.current = [];
+
 			const defaultCenter = { lat: 33.5731, lng: -7.6298 };
-			const coords = salon.coordinates || defaultCenter;
-			const marker = new google.maps.Marker({
-				position: coords,
-				map: googleMapRef.current,
-				title: salon.name,
-				icon: {
-					path: google.maps.SymbolPath.CIRCLE,
-					scale: 10,
-					fillColor: "#8b7260",
+			const bounds: [number, number][] = [];
+
+			filteredResults.forEach((salon) => {
+				const coords =
+					salon.coordinates?.lat && salon.coordinates?.lng
+						? salon.coordinates
+						: defaultCenter;
+				const latLng: [number, number] = [coords.lat, coords.lng];
+				bounds.push(latLng);
+
+				const marker = L.circleMarker(latLng, {
+					radius: 10,
+					color: '#ffffff',
+					weight: 3,
+					fillColor: '#8b7260',
 					fillOpacity: 1,
-					strokeWeight: 3,
-					strokeColor: "#ffffff",
+				});
+
+				marker.on('mouseover', () => setSelectedSalon(salon.id));
+				marker.on('mouseout', () => setSelectedSalon(null));
+				marker.on('click', () => {
+					setSelectedSalon(salon.id);
+					router.push(getSalonHref(salon));
+				});
+
+				marker.bindTooltip(salon.name || 'Salon', {
+					direction: 'top',
+					offset: [0, -8],
+					opacity: 0.95,
+				});
+
+				marker.addTo(markersLayerRef.current);
+				markersRef.current.push({ marker, id: salon.id });
+			});
+
+			// One-time fit on first markers load; later list filter/sync keep user zoom/center
+			if (!hasFitBoundsOnceRef.current) {
+				if (bounds.length > 0) {
+					try {
+						leafletMapRef.current.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+						hasFitBoundsOnceRef.current = true;
+					} catch {
+						/* ignore */
+					}
+				} else {
+					try {
+						leafletMapRef.current.setView([defaultCenter.lat, defaultCenter.lng], 13);
+						hasFitBoundsOnceRef.current = true;
+					} catch {
+						/* ignore */
+					}
+				}
+			}
+
+			requestAnimationFrame(() => {
+				try {
+					leafletMapRef.current?.invalidateSize();
+				} catch {
+					/* ignore */
 				}
 			});
+		})();
 
-			// Add hover listeners to marker
-			marker.addListener('mouseover', () => {
-				setSelectedSalon(salon.id);
-			});
-			marker.addListener('mouseout', () => {
-				setSelectedSalon(null);
-			});
+		return () => {
+			cancelled = true;
+		};
+	}, [filteredResults, loading, mapReady]);
 
-			const imageUrl = getImageUrl(salon.coverImage || salon.logo) || 'https://images.unsplash.com/photo-1560066984-138dadb4c035?w=800&q=80';
-			const category = salon.category || 'Établissement';
-			const rating = salon.rating || 0;
-			const reviews = salon.reviews || 0;
-			const price = salon.price || null;
-			const address = salon.address || salon.city || 'Casablanca';
-			const priceDisplay = price ? `<div style="width: 2px; height: 2px; background: #ddd; border-radius: 50%;"></div><span style="color: #666; font-size: 12px; font-weight: 600;">${price}</span>` : '';
-			const content = `
-				<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; width: 280px; overflow: hidden; border-radius: 16px; box-shadow: 0 12px 40px rgba(0,0,0,0.12);">
-					<div style="position: relative; width: 100%; height: 80px; overflow: hidden;">
-						<img src="${imageUrl}" alt="${salon.name}" style="width: 100%; height: 100%; object-fit: cover;" />
-						<div style="position: absolute; top: 8px; right: 8px; background: rgba(255,255,255,0.95); backdrop-filter: blur(8px); padding: 4px 10px; border-radius: 12px;">
-							<span style="font-size: 11px; font-weight: 600; color: #1a1a1a;">${category}</span>
-						</div>
-					</div>
-					<div style="padding: 14px; background: white;">
-						<div style="font-size: 16px; font-weight: 600; color: #1a1a1a; margin-bottom: 8px; line-height: 1.3;">${salon.name}</div>
-						<div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
-							<div style="display: flex; align-items: center; gap: 3px; background: #fef3e7; padding: 3px 8px; border-radius: 10px;">
-								<span style="color: #8b7260; font-weight: 700; font-size: 13px;">★ ${rating.toFixed(1)}</span>
-							</div>
-							<span style="color: #999; font-size: 12px;">(${reviews})</span>
-							${priceDisplay}
-						</div>
-						<div style="display: flex; align-items: center; gap: 5px; color: #666; font-size: 12px; margin-bottom: 10px;">
-							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-							<span>${address}</span>
-						</div>
-						<div style="display: inline-block; width: 100%; padding: 10px 0; background: linear-gradient(135deg, #8b7260 0%, #6d5a4d 100%); color: white; border-radius: 12px; font-size: 13px; font-weight: 600; cursor: pointer; text-align: center; box-shadow: 0 3px 10px rgba(139,114,96,0.3);" id="gm-btn-${salon.id}">
-							Réserver
-						</div>
-					</div>
-				</div>
-			`;
-			const infowindow = new google.maps.InfoWindow({ 
-				content,
-				maxWidth: 280,
-				pixelOffset: new google.maps.Size(0, -10)
-			});
-
-			marker.addListener('click', () => {
-				markersRef.current.forEach(m => m.infowindow.close());
-				setSelectedSalon(salon.id);
-				try {
-					const pos = marker.getPosition();
-					if (pos && googleMapRef.current) {
-						googleMapRef.current.panTo(pos);
-						googleMapRef.current.setZoom?.(14);
-					}
-				} catch (e) {}
-				setTimeout(() => {
-					const btn = document.getElementById(`gm-btn-${salon.id}`);
-					if (btn) {
-						btn.onclick = (e) => {
-							e.stopPropagation();
-							router.push(getSalonHref(salon));
-						};
-					}
-				}, 100);
-			});
-
-			return { marker, infowindow, id: salon.id };
-		});
-	}, [filteredResults, loading]);
-
+	// Card↔marker sync: style only — no pan/zoom (preserve user camera)
 	useEffect(() => {
-		const google = (window as any).google;
-		if (!google || !markersRef.current) return;
+		if (!mapReady || !markersRef.current.length) return;
+
 		markersRef.current.forEach((m) => {
 			if (!m.marker) return;
-			if (m.id === selectedSalon) {
-				// highlight selected marker only (no InfoWindow opening)
-				m.marker.setIcon({
-					path: google.maps.SymbolPath.CIRCLE,
-					scale: 16,
-					fillColor: "#8b7260",
-					fillOpacity: 1,
-					strokeWeight: 5,
-					strokeColor: "#ffffff",
-					zIndex: 1000,
-				});
-				const pos = m.marker.getPosition();
-				if (pos && googleMapRef.current) {
-					try {
-						// Smoothly pan to the marker position
-						googleMapRef.current.panTo(pos);
-						// Optionally zoom in slightly for better visibility
-						const currentZoom = googleMapRef.current.getZoom();
-						if (currentZoom && currentZoom < 15) {
-							googleMapRef.current.setZoom(15);
-						}
-					} catch (e) {}
-				}
-			} else {
-				m.marker.setIcon({
-					path: google.maps.SymbolPath.CIRCLE,
-					scale: 10,
-					fillColor: "#8b7260",
-					fillOpacity: 0.7,
-					strokeWeight: 2,
-					strokeColor: "#ffffff",
-					zIndex: 1,
-				});
+			const selected = m.id === selectedSalon;
+			m.marker.setStyle({
+				radius: selected ? 16 : 10,
+				color: '#ffffff',
+				weight: selected ? 5 : 2,
+				fillColor: '#8b7260',
+				fillOpacity: selected ? 1 : 0.7,
+			});
+			if (selected) {
+				m.marker.bringToFront();
 			}
 		});
-	}, [selectedSalon]);
+	}, [selectedSalon, mapReady]);
 
 	const toggleLike = async (salon: any) => {
 		if (!isAuthenticated || !user?.email) {
@@ -776,15 +821,22 @@ function LuxurySearchResultsContent() {
 					-ms-overflow-style: none;  /* IE and Edge */
 					scrollbar-width: none;  /* Firefox */
 				}
+
+				#map.leaflet-container,
+				#map {
+					width: 100%;
+					height: 100%;
+					background: #e8ebe6;
+				}
 			`}</style>
 
 			{/* Header - Fixed */}
 			<RezaNavbar />
 
-			{/* Main Content */}
-			<div className="flex pt-20 relative z-10"> {/* restore padding for header-only layout */}
+			{/* Main Content — results ~55% + map ~45% fill viewport */}
+			<div className="flex w-full pt-20 relative z-10 min-h-[calc(100vh-5rem)]">
 				{/* Left Side - Results */}
-				<div className={`w-full lg:w-[55%] ${showMobileMap ? 'hidden lg:block' : 'block'} relative z-10 bg-[#f5f7f3] min-h-screen`}>
+				<div className={`w-full lg:w-[55%] lg:flex-shrink-0 ${showMobileMap ? 'hidden lg:block' : 'block'} relative z-10 bg-[#f5f7f3] min-h-[calc(100vh-5rem)]`}>
 					<div className="max-w-4xl mx-auto px-4 sm:px-6 py-4 sm:py-6 lg:py-8 relative z-10">
 						{/* Header with search pills and sort pills on the right */}
 						<div className="mb-6 sm:mb-8 lg:mb-10">
@@ -793,7 +845,13 @@ function LuxurySearchResultsContent() {
 									{/* Number on its own line, label below */}
 									<h1 className="text-3xl sm:text-4xl font-light text-gray-900 leading-none">{loading ? '...' : filteredResults.length}</h1>
 									<span className="block text-base sm:text-lg mt-1" style={{ color: '#8b7260' }}>Salons</span>
-									<p className="text-xs sm:text-sm text-gray-400 mt-2">{location || 'Casablanca et environs'}</p>
+									<p className="text-xs sm:text-sm text-gray-400 mt-2">
+										{location?.trim()
+											? location
+											: userLocation
+												? 'Près de vous'
+												: 'Tous les salons'}
+									</p>
 								</div>
 								{/* Right: Pills (search/location/filter + sort) */}
 								<div className="flex flex-col gap-3 w-full lg:w-auto lg:max-w-lg relative z-[100]">
@@ -819,9 +877,11 @@ function LuxurySearchResultsContent() {
 											</div>
 											<button
 												type="button"
-												onClick={requestUserLocation}
+												onClick={() => void requestUserLocation()}
 												disabled={geoLoading}
-												className="p-1 rounded-full hover:bg-gray-100 text-[#8b7260] disabled:opacity-50 flex-shrink-0"
+												className={`p-1 rounded-full hover:bg-gray-100 disabled:opacity-50 flex-shrink-0 ${
+													userLocation ? 'text-emerald-600' : 'text-[#8b7260]'
+												}`}
 												title="Utiliser ma position"
 												aria-label="Utiliser ma position"
 											>
@@ -840,7 +900,15 @@ function LuxurySearchResultsContent() {
 										{sortOptions.map((opt) => (
 											<button
 												key={opt.key}
-												onClick={() => setSortBy(opt.key)}
+												onClick={() => {
+													if (opt.key === 'distance' && !userLocation) {
+														void requestUserLocation().then((ok) => {
+															if (ok) setSortBy('distance');
+														});
+														return;
+													}
+													setSortBy(opt.key);
+												}}
 												className={`px-5 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all border relative z-[100] shadow-sm flex-shrink-0 ${
 													sortBy === opt.key
 														? 'bg-[#8b7260] text-white border-[#8b7260]'
@@ -854,6 +922,44 @@ function LuxurySearchResultsContent() {
 								</div>
 							</div>
 						</div>
+
+						{/* Soft location prompt — once; hide silently after deny / Plus tard */}
+						{showGeoPrompt === true && !userLocation && (
+							<div
+								className="mb-6 flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-[#8b7260]/30 bg-white px-4 py-3 shadow-sm"
+							>
+								<div className="flex items-start gap-3 flex-1 min-w-0">
+									<div className="mt-0.5 rounded-full p-2 flex-shrink-0 bg-[#8b7260]/10">
+										<MapPin className="w-4 h-4 text-[#8b7260]" />
+									</div>
+									<div className="min-w-0">
+										<p className="text-sm font-medium text-gray-900">
+											Afficher les salons près de vous ?
+										</p>
+										<p className="text-xs mt-0.5 text-gray-500">
+											Autorisez la localisation pour le tri « Plus proche » et les distances. Sinon, tous les salons restent visibles.
+										</p>
+									</div>
+								</div>
+								<div className="flex items-center gap-2 flex-shrink-0 sm:self-center">
+									<button
+										type="button"
+										onClick={dismissGeoPrompt}
+										className="px-3 py-2 text-xs font-medium text-gray-500 hover:text-gray-800"
+									>
+										Plus tard
+									</button>
+									<button
+										type="button"
+										onClick={() => void requestUserLocation()}
+										disabled={geoLoading}
+										className="px-4 py-2 rounded-full bg-[#8b7260] text-white text-xs font-medium hover:opacity-90 disabled:opacity-50 whitespace-nowrap"
+									>
+										{geoLoading ? 'Localisation…' : 'Utiliser ma position'}
+									</button>
+								</div>
+							</div>
+						)}
 
 						{/* Results */}
 						{loading ? (
@@ -869,18 +975,16 @@ function LuxurySearchResultsContent() {
 							{filteredResults.map((salon, index) => (
 								<div
 									key={salon.id}
-									className={`group cursor-pointer animate-fadeInUp relative z-[50] ${
-										selectedSalon === salon.id ? 'ring-2 ring-[#8b7260] ring-opacity-50' : ''
-									}`}
+									className="group cursor-pointer animate-fadeInUp relative z-[50]"
 									style={{ animationDelay: `${index * 100}ms` }}
 									onMouseEnter={() => setSelectedSalon(salon.id)}
 									onMouseLeave={() => setSelectedSalon(null)}
 									onClick={() => router.push(getSalonHref(salon))}
 								>
-									<div className={`flex flex-col sm:flex-row gap-4 sm:gap-6 p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-white border transition-all duration-300 relative z-[50] ${
+									<div className={`flex flex-col sm:flex-row gap-4 sm:gap-6 p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-white border-2 transition-colors duration-200 relative z-[50] ${
 										selectedSalon === salon.id 
-											? 'border-[#8b7260] shadow-lg scale-[1.02]' 
-											: 'border-gray-100 hover:border-gray-200 hover:shadow-sm'
+											? 'border-[#8b7260]' 
+											: 'border-transparent hover:border-gray-200'
 									}`}>
 										{/* Image */}
 										<div className="relative w-full sm:w-56 h-48 sm:h-56 flex-shrink-0 overflow-hidden rounded-xl sm:rounded-2xl">
@@ -1010,10 +1114,20 @@ function LuxurySearchResultsContent() {
 					</div>
 				</div>
 
-				{/* Right Side - Map */}
-				<div className={`w-full lg:w-[45%] fixed right-0 top-20 bottom-0 z-[1] ${showMobileMap ? 'block' : 'hidden lg:block'}`}> {/* align with header height */}
-					{/* map container */}
-					<div ref={mapRef} className="w-full h-full" style={{ zIndex: 1 }} />
+				{/* Right Side - Map: sticky desktop panel; fixed fullscreen on mobile toggle */}
+				<div
+					className={`${
+						showMobileMap
+							? 'fixed inset-x-0 top-20 bottom-0 z-[1] block w-full lg:static lg:inset-auto'
+							: 'hidden'
+					} lg:block lg:w-[45%] lg:flex-shrink-0 lg:sticky lg:top-20 lg:h-[calc(100vh-5rem)] lg:self-start lg:z-[1] bg-[#e8ebe6]`}
+				>
+					<div
+						id="map"
+						ref={mapRef}
+						className="w-full h-full min-h-[calc(100vh-5rem)] lg:min-h-0"
+						style={{ zIndex: 1 }}
+					/>
 				</div>
 
 				{/* Mobile Map Toggle */}

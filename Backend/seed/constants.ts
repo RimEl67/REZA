@@ -1,0 +1,62 @@
+/** Shared demo credentials — safe for local/dev seed only. */
+export const PASSWORDS = {
+  admin: 'password123',
+  superadmin: '123456',
+  client: '123456',
+} as const;
+
+export const SUPERADMIN = {
+  email: 'superadmin@gmail.com',
+  firstName: 'Super',
+  lastName: 'Admin',
+} as const;
+
+export const SPA_ROYAL_ADMIN = {
+  email: 'admin@spa-royal.ma',
+  firstName: 'Admin',
+  lastName: 'Spa Royal',
+} as const;
+
+export const BASE_PLAN = {
+  name: 'Standard',
+  priceCents: 80_000,
+  currency: 'MAD',
+  interval: 'year',
+  maxSalons: 3,
+} as const;
+
+/** English keys required by schedulingValidation + getAvailableSlots */
+export const BUSINESS_HOURS_BY_DAY = {
+  monday: { open: '09:00', close: '19:00' },
+  tuesday: { open: '09:00', close: '19:00' },
+  wednesday: { open: '09:00', close: '19:00' },
+  thursday: { open: '09:00', close: '19:00' },
+  friday: { open: '09:00', close: '19:00' },
+  saturday: { open: '10:00', close: '18:00' },
+  sunday: null as null,
+};
+
+export const WEEKDAY_SCHEDULES = [
+  { day: 'Lundi', isOpen: true, openTime: '09:00', closeTime: '19:00', breaks: [] as { start: string; end: string }[] },
+  { day: 'Mardi', isOpen: true, openTime: '09:00', closeTime: '19:00', breaks: [] },
+  { day: 'Mercredi', isOpen: true, openTime: '09:00', closeTime: '19:00', breaks: [] },
+  { day: 'Jeudi', isOpen: true, openTime: '09:00', closeTime: '19:00', breaks: [] },
+  { day: 'Vendredi', isOpen: true, openTime: '09:00', closeTime: '19:00', breaks: [] },
+  { day: 'Samedi', isOpen: true, openTime: '10:00', closeTime: '18:00', breaks: [] },
+  { day: 'Dimanche', isOpen: false, openTime: '10:00', closeTime: '18:00', breaks: [] },
+];
+
+export const TENANT_BUSINESS_HOURS = {
+  schedules: WEEKDAY_SCHEDULES,
+  ...BUSINESS_HOURS_BY_DAY,
+};
+
+export const EMPLOYEE_WORKING_HOURS = [
+  { day: 'Lundi', isWorking: true, startTime: '09:00', endTime: '19:00', breaks: [{ start: '13:00', end: '14:00' }] },
+  { day: 'Mardi', isWorking: true, startTime: '09:00', endTime: '19:00', breaks: [{ start: '13:00', end: '14:00' }] },
+  { day: 'Mercredi', isWorking: true, startTime: '09:00', endTime: '19:00', breaks: [{ start: '13:00', end: '14:00' }] },
+  { day: 'Jeudi', isWorking: true, startTime: '09:00', endTime: '19:00', breaks: [{ start: '13:00', end: '14:00' }] },
+  { day: 'Vendredi', isWorking: true, startTime: '09:00', endTime: '19:00', breaks: [{ start: '13:00', end: '14:00' }] },
+  { day: 'Samedi', isWorking: true, startTime: '10:00', endTime: '18:00', breaks: [] },
+  { day: 'Dimanche', isWorking: false, startTime: '10:00', endTime: '18:00', breaks: [] },
+];

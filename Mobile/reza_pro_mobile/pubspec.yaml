@@ -1,5 +1,5 @@
 name: wellbepro_mobile
-description: "WellBePro - Application mobile de gestion de salon pour professionnels."
+description: "Reza Pro - Application mobile de gestion de salon pour professionnels."
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -17,6 +17,7 @@ dependencies:
   provider: ^6.1.2
   shared_preferences: ^2.3.2
   flutter_animate: ^4.5.0
+  http: ^1.2.2
 
 dev_dependencies:
   flutter_test:

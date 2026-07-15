@@ -109,7 +109,7 @@ function DailyStatisticsPageContent() {
       `}</style>
 
       {/* Header */}
-      <div className="mb-12 pt-20 animate-slideUp">
+      <div className="mb-12 animate-slideUp">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-5xl font-light text-gray-900 tracking-tight mb-2">RDV</h1>

@@ -1,7 +1,15 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import '../constants/app_colors.dart';
+import '../models/client.dart';
+import '../viewmodels/agenda_viewmodel.dart';
+import '../viewmodels/admin_viewmodel.dart';
+import '../viewmodels/auth_viewmodel.dart';
+import '../viewmodels/caisse_viewmodel.dart';
+import '../viewmodels/clients_viewmodel.dart';
+import '../services/client_service.dart';
 import 'agenda/agenda_screen.dart';
 import 'clients/clients_screen.dart';
 import 'caisse/caisse_screen.dart';
@@ -22,16 +30,41 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
   late AnimationController _animationController;
   late Animation<double> _rotationAnimation;
 
-  final List<Widget> _screens = const [
-    AgendaScreen(),
-    ClientsScreen(),
-    CaisseScreen(),
-    AdminScreen(),
-  ];
+  /// Stable VMs — do NOT remount on salon filter (would close open drawer).
+  late final AgendaViewModel _agendaVm;
+  late final ClientsViewModel _clientsVm;
+  late final CaisseViewModel _caisseVm;
+  late final AdminViewModel _adminVm;
+  late final List<Widget> _screens;
+
+  AuthViewModel? _auth;
+  String? _lastSalonFilterScopeKey;
 
   @override
   void initState() {
     super.initState();
+    _agendaVm = AgendaViewModel()..bootstrap();
+    _clientsVm = ClientsViewModel()..load();
+    _caisseVm = CaisseViewModel()..load();
+    _adminVm = AdminViewModel()..loadAll();
+    _screens = [
+      ChangeNotifierProvider<AgendaViewModel>.value(
+        value: _agendaVm,
+        child: const AgendaScreen(),
+      ),
+      ChangeNotifierProvider<ClientsViewModel>.value(
+        value: _clientsVm,
+        child: const ClientsScreen(),
+      ),
+      ChangeNotifierProvider<CaisseViewModel>.value(
+        value: _caisseVm,
+        child: const CaisseScreen(),
+      ),
+      ChangeNotifierProvider<AdminViewModel>.value(
+        value: _adminVm,
+        child: const AdminScreen(),
+      ),
+    ];
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 250),
@@ -42,8 +75,38 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final auth = context.read<AuthViewModel>();
+    if (!identical(_auth, auth)) {
+      _auth?.removeListener(_onAuthChanged);
+      _auth = auth;
+      _lastSalonFilterScopeKey = auth.salonFilterScopeKey;
+      _auth!.addListener(_onAuthChanged);
+    }
+  }
+
+  void _onAuthChanged() {
+    final auth = _auth;
+    if (auth == null || !mounted) return;
+    final scope = auth.salonFilterScopeKey;
+    if (scope == _lastSalonFilterScopeKey) return;
+    _lastSalonFilterScopeKey = scope;
+    // Filter already applied on apiClient; refetch without remounting Scaffold/drawer.
+    _agendaVm.bootstrap();
+    _clientsVm.load();
+    _caisseVm.load();
+    _adminVm.loadAll();
+  }
+
+  @override
   void dispose() {
+    _auth?.removeListener(_onAuthChanged);
     _animationController.dispose();
+    _agendaVm.dispose();
+    _clientsVm.dispose();
+    _caisseVm.dispose();
+    _adminVm.dispose();
     super.dispose();
   }
 
@@ -112,8 +175,17 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
     );
   }
 
-  void _fideliteVIP() {
+  Future<void> _fideliteVIP() async {
     _toggleMenu();
+    List<Client> top = [];
+    try {
+      final raw = await clientService.list(limit: 100);
+      top = raw.map(Client.fromJson).toList()
+        ..sort((a, b) => b.totalVisits.compareTo(a.totalVisits));
+      top = top.take(5).toList();
+    } catch (_) {}
+
+    if (!mounted) return;
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
@@ -131,22 +203,26 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
               style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            ListTile(
-              leading: CircleAvatar(
-                backgroundColor: AppColors.primary.withOpacity(0.1),
-                child: Icon(Icons.star, color: AppColors.primary),
-              ),
-              title: Text('Yasmine Benali', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
-              subtitle: Text('Fidélité Or - 24 visites', style: GoogleFonts.outfit()),
-            ),
-            ListTile(
-              leading: CircleAvatar(
-                backgroundColor: AppColors.primary.withOpacity(0.1),
-                child: Icon(Icons.star, color: AppColors.primary),
-              ),
-              title: Text('Khalid Amrani', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
-              subtitle: Text('Fidélité Argent - 18 visites', style: GoogleFonts.outfit()),
-            ),
+            if (top.isEmpty)
+              Text('Aucun client VIP pour le moment',
+                  style: GoogleFonts.outfit(color: AppColors.textGray))
+            else
+              ...top.map((c) {
+                final tier = c.totalVisits >= 20
+                    ? 'Or'
+                    : c.totalVisits >= 10
+                        ? 'Argent'
+                        : 'Bronze';
+                return ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: AppColors.primary.withOpacity(0.1),
+                    child: Icon(Icons.star, color: AppColors.primary),
+                  ),
+                  title: Text(c.name, style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+                  subtitle: Text('Fidélité $tier - ${c.totalVisits} visites',
+                      style: GoogleFonts.outfit()),
+                );
+              }),
           ],
         ),
       ),

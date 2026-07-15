@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Calendar, Clock, User, Phone, Mail, X, ChevronLeft, ChevronRight, MoreVertical, Plus, CalendarIcon, MapPin, Upload, Image as ImageIcon, Check } from 'lucide-react';
+import { Calendar, Clock, User, Phone, Mail, X, ChevronLeft, ChevronRight, MoreVertical, Plus, CalendarIcon, MapPin, Upload, Image as ImageIcon, Check, UserX, Flag } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -32,6 +32,7 @@ import toast from 'react-hot-toast';
 // API Appointment type
 type ApiAppointment = {
   id: string;
+  tenantId: string;
   clientId: string;
   serviceId: string;
   employeeId: string | null;
@@ -53,6 +54,8 @@ type ApiAppointment = {
     name: string;
     color: string;
     duration: number;
+    price?: number | null;
+    priceFrom?: number | null;
   };
   employee: {
     id: string;
@@ -79,6 +82,18 @@ type Appointment = {
   clientId?: string;
   serviceId?: string;
   employeeId?: string | null;
+  /** Required on create when multi-salon filter is active */
+  tenantId?: string;
+  /** Catalog price snapshot for caisse */
+  servicePrice?: number | null;
+};
+
+type FinalizePaymentMethod = 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK';
+
+type FinalizeModalState = {
+  appointment: Appointment;
+  paymentMethod: FinalizePaymentMethod;
+  loading: boolean;
 };
 
 type Client = {
@@ -151,7 +166,9 @@ const transformApiAppointment = (apiApt: ApiAppointment): Appointment => {
     cancelledByClient: apiApt.cancelledBy === apiApt.clientId,
     clientId: apiApt.clientId,
     serviceId: apiApt.serviceId,
-    employeeId: apiApt.employeeId
+    employeeId: apiApt.employeeId,
+    tenantId: apiApt.tenantId,
+    servicePrice: apiApt.service.price ?? apiApt.service.priceFrom ?? null,
   };
 };
 
@@ -198,11 +215,23 @@ const transformToApiAppointment = (apt: Appointment, date: Date, time: string): 
     startTime: startTimeISO,
     duration: apt.duration,
     notes: apt.notes || undefined,
-    status: statusMap[apt.status] || 'CONFIRMED'
+    status: statusMap[apt.status] || 'CONFIRMED',
+    ...(apt.tenantId ? { tenantId: apt.tenantId } : {}),
   };
 };
 
 const ACTIVE_APPOINTMENT_STATUSES = new Set(['pending', 'confirmed', 'in_progress']);
+
+const canConfirmStatus = (status: string) => status === 'pending';
+const canMarkAbsentOrDone = (status: string) =>
+  status === 'pending' || status === 'confirmed' || status === 'in_progress';
+
+const PAYMENT_METHOD_LABELS: Record<FinalizePaymentMethod, string> = {
+  CASH: 'Espèces',
+  CARD: 'Carte',
+  BANK_TRANSFER: 'Virement',
+  CHECK: 'Chèque',
+};
 
 const getAppointmentWindow = (date: Date, time: string, duration: number) => {
   const [hours, minutes] = time.split(':').map(Number);
@@ -267,8 +296,11 @@ interface NewAppointmentModalProps {
 }
 
 const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCreateAppointment, employeesData = [], initialDate, initialTime }) => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, salons, isSalonFilterMulti, effectiveSalonIds } = useAuth();
   const router = useRouter();
+  const [createTenantId, setCreateTenantId] = useState(() =>
+    !isSalonFilterMulti && effectiveSalonIds.length === 1 ? effectiveSalonIds[0] : ''
+  );
   const [date, setDate] = useState<Date | undefined>(initialDate);
   const [time, setTime] = useState(initialTime || '');
   const [service, setService] = useState('');
@@ -287,17 +319,24 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
   const [newClientEmail, setNewClientEmail] = useState('');
   const [loading, setLoading] = useState(false);
   
-  // Fetch clients, services, and employees from API
+  // Fetch clients, services, and employees from API (scoped to create salon when multi)
   useEffect(() => {
     if (!isAuthenticated) return;
-    
+    if (isSalonFilterMulti && !createTenantId) {
+      setClients([]);
+      setServices([]);
+      setEmployees([]);
+      return;
+    }
+
     const fetchData = async () => {
       try {
         setLoading(true);
+        const scope = createTenantId ? { salonIds: createTenantId } : undefined;
         const [clientsRes, servicesRes, employeesRes] = await Promise.all([
-          api.getClients({ limit: 1000 }),
-          api.getServices(),
-          api.getEmployees({ active: true })
+          api.getClients({ limit: 1000 }, scope),
+          api.getServices(undefined, scope),
+          api.getEmployees({ active: true }, scope)
         ]);
         
         const clientsData = (clientsRes.clients || []).map((c: any) => ({
@@ -316,20 +355,20 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
         }));
         setServices(servicesData);
         
-        const employeesData = (employeesRes.employees || []).map((e: any) => ({
+        const employeesDataMapped = (employeesRes.employees || []).map((e: any) => ({
           id: e.id,
           name: `${e.firstName} ${e.lastName}`
         }));
-        setEmployees(employeesData);
+        setEmployees(employeesDataMapped);
       } catch (err) {
         console.error('Error fetching data:', err);
       } finally {
         setLoading(false);
       }
     };
-    
+
     fetchData();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, createTenantId, isSalonFilterMulti]);
 
   const filteredClients = clients.filter(client =>
     client.name.toLowerCase().includes(clientSearch.toLowerCase()) ||
@@ -361,6 +400,11 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
 
   const handleCreate = () => {
     // Validation
+    if (isSalonFilterMulti && !createTenantId) {
+      setCreateError('Veuillez sélectionner un salon');
+      setTimeout(() => setCreateError(null), 3000);
+      return;
+    }
     if (!date || !time || !serviceId || !duration || !selectedClient) {
       setCreateError('Veuillez remplir tous les champs obligatoires');
       setTimeout(() => setCreateError(null), 3000);
@@ -403,7 +447,8 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
       notes,
       clientId: selectedClient.id,
       serviceId: serviceId,
-      employeeId: employeeId || null
+      employeeId: employeeId || null,
+      tenantId: createTenantId || undefined,
     };
 
     onCreateAppointment(newAppointment);
@@ -503,6 +548,35 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
           </div>
         )}
 
+        {isSalonFilterMulti && (
+          <div className="space-y-2">
+            <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider">Salon</h3>
+            <Select
+              value={createTenantId || undefined}
+              onValueChange={(id) => {
+                setCreateTenantId(id);
+                setSelectedClient(null);
+                setClientSearch('');
+                setServiceId('');
+                setEmployeeId('');
+              }}
+            >
+              <SelectTrigger className="rounded-full px-4 py-2">
+                <SelectValue placeholder="Choisir un salon *" />
+              </SelectTrigger>
+              <SelectContent>
+                {salons
+                  .filter((s) => effectiveSalonIds.includes(s.id))
+                  .map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         {/* Client Info */}
         <div className="space-y-4">
           <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider">Client</h3>
@@ -515,7 +589,7 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
               isLoading={loading}
               isDisabled={loading}
               placeholder="Taper le nom, email ou téléphone..."
-              noOptionsMessage={() => "Aucun client trouvé"}
+              noOptionsMessage={() =>"Aucun client trouvé"}
               options={clients.map(c => ({ value: c.id, label: `${c.name} ${c.email ? `- ${c.email}` : ''} ${c.phone ? `- ${c.phone}` : ''}`, client: c }))}
               onChange={(option: any) => {
                 if (option) {
@@ -627,7 +701,7 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
               isLoading={loading}
               isDisabled={loading || services.length === 0}
               placeholder={loading ? "Chargement..." : "Sélectionner un service"}
-              noOptionsMessage={() => "Aucun service trouvé"}
+              noOptionsMessage={() =>"Aucun service trouvé"}
               options={services.map(s => ({ value: s.id, label: `${s.name} (${s.duration} min)`, service: s }))}
               onChange={(option: any) => {
                 setServiceId(option ? option.value : '');
@@ -661,8 +735,7 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
                 <PopoverTrigger asChild>
                   <Button
                     variant="outline"
-                    className={cn(
-                      "w-full justify-start text-left font-normal rounded-full px-4 py-2 mt-2 h-auto",
+                    className={cn("w-full justify-start text-left font-normal rounded-full px-4 py-2 mt-2 h-auto",
                       !date && "text-muted-foreground"
                     )}
                   >
@@ -742,7 +815,7 @@ interface AppointmentCardProps {
   apt: Appointment;
   isCompact?: boolean;
   onDragStart?: (e: React.DragEvent<HTMLDivElement>, appointment: Appointment) => void;
-  onStatusUpdate?: (appointmentId: string, newStatus: string) => void;
+  onStatusUpdate?: (appointment: Appointment, newStatus: string) => void;
   onShowDetails?: (appointment: Appointment) => void;
   employeeColor?: string;
   serviceColor?: string;
@@ -854,11 +927,11 @@ const AppointmentCard: React.FC<AppointmentCardProps> = ({
           )}
         </div>
         <div className="flex items-center gap-1">
-          {!isCompact && apt.status === 'pending' && onStatusUpdate && (
+          {!isCompact && canConfirmStatus(apt.status) && onStatusUpdate && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onStatusUpdate(apt.id, 'confirmed');
+                onStatusUpdate(apt, 'confirmed');
               }}
               className="px-2 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded transition-colors"
               title="Confirmer le rendez-vous"
@@ -883,11 +956,11 @@ const AppointmentCard: React.FC<AppointmentCardProps> = ({
               align="end"
               onClick={(e) => e.stopPropagation()}
             >
-              {apt.status === 'pending' && onStatusUpdate && (
+              {canConfirmStatus(apt.status) && onStatusUpdate && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    onStatusUpdate(apt.id, 'confirmed');
+                    onStatusUpdate(apt, 'confirmed');
                     setShowMenu(false);
                   }}
                   className="w-full text-left px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-50 rounded transition-colors flex items-center gap-2"
@@ -895,6 +968,32 @@ const AppointmentCard: React.FC<AppointmentCardProps> = ({
                   <Check size={14} />
                   Confirmer
                 </button>
+              )}
+              {canMarkAbsentOrDone(apt.status) && onStatusUpdate && (
+                <>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onStatusUpdate(apt, 'completed');
+                      setShowMenu(false);
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm text-blue-700 hover:bg-blue-50 rounded transition-colors flex items-center gap-2"
+                  >
+                    <Flag size={14} />
+                    Terminé
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onStatusUpdate(apt, 'no_show');
+                      setShowMenu(false);
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm text-orange-700 hover:bg-orange-50 rounded transition-colors flex items-center gap-2"
+                  >
+                    <UserX size={14} />
+                    Absent
+                  </button>
+                </>
               )}
               <button
                 onClick={(e) => {
@@ -925,7 +1024,8 @@ const AppointmentCard: React.FC<AppointmentCardProps> = ({
 };
 
 const RendezVousPage = () => {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, salonFilter, effectiveSalonIds } = useAuth();
+  const salonFilterKey = salonFilter === 'all' ? 'all' : effectiveSalonIds.join(',');
   const [mounted, setMounted] = useState(false);
   const [view, setView] = useState('week'); // day, week, month
   const [currentDate, setCurrentDate] = useState(() => {
@@ -940,6 +1040,7 @@ const RendezVousPage = () => {
   const [draggedEvent, setDraggedEvent] = useState<Appointment | null>(null);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [finalizeModal, setFinalizeModal] = useState<FinalizeModalState | null>(null);
   const [filterStatus, setFilterStatus] = useState('all');
   const [selectedEmployee, setSelectedEmployee] = useState('all');
   const [refreshKey, setRefreshKey] = useState(0);
@@ -1117,7 +1218,7 @@ const RendezVousPage = () => {
     };
     
     fetchDisplaySettings();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, salonFilterKey]);
 
   // Get selected employee's color for calendar background
   const getSelectedEmployeeColor = () => {
@@ -1253,10 +1354,10 @@ const RendezVousPage = () => {
     }
   };
   
-  // Fetch appointments when view or date changes
+  // Fetch appointments when view, date, or salon filter changes
   useEffect(() => {
     fetchAppointments();
-  }, [isAuthenticated, view, currentDate]);
+  }, [isAuthenticated, view, currentDate, salonFilterKey]);
 
   // Filter appointments based on selected employee
   const getFilteredAppointments = () => {
@@ -1485,7 +1586,26 @@ const RendezVousPage = () => {
     }
   };
   
-  const handleUpdateAppointmentStatus = async (appointmentId: string, newStatus: string) => {
+  const handleUpdateAppointmentStatus = async (
+    appointmentOrId: Appointment | string,
+    newStatus: string
+  ) => {
+    const appointment =
+      typeof appointmentOrId === 'string'
+        ? appointments.find((a) => a.id === appointmentOrId) || null
+        : appointmentOrId;
+    const appointmentId = typeof appointmentOrId === 'string' ? appointmentOrId : appointmentOrId.id;
+
+    // Terminé → ask caisse first
+    if (newStatus === 'completed' && appointment) {
+      setFinalizeModal({
+        appointment,
+        paymentMethod: 'CASH',
+        loading: false,
+      });
+      return;
+    }
+
     try {
       const statusMap: Record<string, string> = {
         'pending': 'PENDING',
@@ -1509,14 +1629,91 @@ const RendezVousPage = () => {
         status: statusMap[newStatus] || 'CONFIRMED'
       });
       
-      // Refresh appointments
       await fetchAppointments();
-      
-      // Show success message
       toast.success(`Rendez-vous ${statusLabels[newStatus] || 'confirmé'} avec succès`);
     } catch (err) {
       console.error('Error updating appointment status:', err);
       toast.error('Erreur lors de la mise à jour du statut');
+    }
+  };
+
+  const closeFinalizeModal = () => {
+    if (finalizeModal?.loading) return;
+    setFinalizeModal(null);
+  };
+
+  const markAppointmentCompleted = async (appointmentId: string) => {
+    await api.updateAppointment(appointmentId, { status: 'COMPLETED' });
+    await fetchAppointments();
+  };
+
+  const handleFinalizeWithCaisse = async () => {
+    if (!finalizeModal) return;
+    const apt = finalizeModal.appointment;
+
+    if (!apt.clientId) {
+      toast.error('Client manquant — marquage terminé sans caisse');
+      setFinalizeModal({ ...finalizeModal, loading: true });
+      try {
+        await markAppointmentCompleted(apt.id);
+        toast.success('Rendez-vous terminé (sans caisse)');
+        setFinalizeModal(null);
+        setShowDetailsModal(false);
+        setSelectedAppointment(null);
+      } catch (err) {
+        console.error(err);
+        toast.error('Erreur lors de la mise à jour du statut');
+        setFinalizeModal((prev) => (prev ? { ...prev, loading: false } : null));
+      }
+      return;
+    }
+
+    if (!apt.serviceId) {
+      toast.error('Service manquant — impossible d’ajouter à la caisse');
+      return;
+    }
+
+    const price = apt.servicePrice && apt.servicePrice > 0 ? apt.servicePrice : undefined;
+    if (!price) {
+      toast.error('Prix du service manquant. Mettez à jour le catalogue ou encaissez depuis la Caisse.');
+      return;
+    }
+
+    setFinalizeModal({ ...finalizeModal, loading: true });
+    try {
+      await api.createSale({
+        clientId: apt.clientId,
+        items: [{ serviceId: apt.serviceId, price, quantity: 1 }],
+        paymentMethod: finalizeModal.paymentMethod,
+        notes: apt.service || undefined,
+        appointmentId: apt.id,
+        ...(apt.tenantId ? { tenantId: apt.tenantId } : {}),
+      });
+      await markAppointmentCompleted(apt.id);
+      toast.success('Rendez-vous terminé et ajouté à la caisse');
+      setFinalizeModal(null);
+      setShowDetailsModal(false);
+      setSelectedAppointment(null);
+    } catch (err: any) {
+      console.error('Error finalize with caisse:', err);
+      toast.error(getApiErrorMessage(err, 'Erreur lors de l’encaissement'));
+      setFinalizeModal((prev) => (prev ? { ...prev, loading: false } : null));
+    }
+  };
+
+  const handleFinalizeWithoutCaisse = async () => {
+    if (!finalizeModal) return;
+    setFinalizeModal({ ...finalizeModal, loading: true });
+    try {
+      await markAppointmentCompleted(finalizeModal.appointment.id);
+      toast.success('Rendez-vous terminé');
+      setFinalizeModal(null);
+      setShowDetailsModal(false);
+      setSelectedAppointment(null);
+    } catch (err) {
+      console.error(err);
+      toast.error('Erreur lors de la mise à jour du statut');
+      setFinalizeModal((prev) => (prev ? { ...prev, loading: false } : null));
     }
   };
 
@@ -1558,7 +1755,7 @@ const RendezVousPage = () => {
       `}</style>
 
       {/* Header - Ultra Minimalist Premium */}
-      <div className="mb-8 animate-slideDown pt-20 relative">
+      <div className="mb-8 animate-slideDown relative">
         {/* Header Image Background */}
         {headerImage && (
           <div className="absolute inset-0 -z-10 overflow-hidden rounded-lg" style={{ height: '100%', minHeight: '120px' }}>
@@ -1814,7 +2011,7 @@ const RendezVousPage = () => {
       </div>
 
       {/* Calendar Views */}
-      <div key={refreshKey} className=" overflow-hidden animate-fadeIn">
+      <div key={refreshKey} className="overflow-hidden animate-fadeIn">
         {view === 'week' && (
           <div className="overflow-x-auto bg-white rounded-lg border border-gray-100 shadow-sm">
             <div className="min-w-[1000px]">
@@ -2238,28 +2435,125 @@ const RendezVousPage = () => {
                 </div>
               )}
             </div>
-            <div className="sticky bottom-0 bg-white border-t border-gray-100 px-6 py-4 flex gap-3">
+            <div className="sticky bottom-0 bg-white border-t border-gray-100 px-6 py-4 flex flex-wrap gap-3">
               <button 
                 onClick={() => {
                   setShowDetailsModal(false);
                   setSelectedAppointment(null);
                 }} 
-                className="flex-1 px-6 py-2.5 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors rounded-full border border-gray-200 hover:border-gray-300"
+                className="flex-1 min-w-[100px] px-6 py-2.5 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors rounded-full border border-gray-200 hover:border-gray-300"
               >
                 Fermer
               </button>
-              {selectedAppointment.status === 'pending' && (
+              {canConfirmStatus(selectedAppointment.status) && (
                 <button 
                   onClick={async () => {
-                    await handleUpdateAppointmentStatus(selectedAppointment.id, 'confirmed');
+                    await handleUpdateAppointmentStatus(selectedAppointment, 'confirmed');
                     setShowDetailsModal(false);
                     setSelectedAppointment(null);
                   }} 
-                  className="flex-1 px-6 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-full hover:bg-emerald-700 transition-colors"
+                  className="flex-1 min-w-[100px] px-6 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-full hover:bg-emerald-700 transition-colors"
                 >
                   Confirmer
                 </button>
               )}
+              {canMarkAbsentOrDone(selectedAppointment.status) && (
+                <>
+                  <button
+                    onClick={() => {
+                      handleUpdateAppointmentStatus(selectedAppointment, 'completed');
+                    }}
+                    className="flex-1 min-w-[100px] px-6 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-full hover:bg-blue-700 transition-colors"
+                  >
+                    Terminé
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await handleUpdateAppointmentStatus(selectedAppointment, 'no_show');
+                      setShowDetailsModal(false);
+                      setSelectedAppointment(null);
+                    }}
+                    className="flex-1 min-w-[100px] px-6 py-2.5 bg-orange-500 text-white text-sm font-medium rounded-full hover:bg-orange-600 transition-colors"
+                  >
+                    Absent
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Finaliser RDV → Caisse */}
+      {finalizeModal && (
+        <div
+          className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4"
+          onClick={closeFinalizeModal}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-5 border-b border-gray-100">
+              <h2 className="text-lg font-semibold text-gray-900">Finaliser le rendez-vous</h2>
+              <p className="text-sm text-gray-600 mt-1">
+                Voulez-vous ajouter cette prestation à la caisse ?
+              </p>
+              <p className="text-xs text-gray-500 mt-2">
+                {finalizeModal.appointment.clientName} · {finalizeModal.appointment.service}
+                {finalizeModal.appointment.servicePrice
+                  ? ` · ${finalizeModal.appointment.servicePrice} MAD`
+                  : ''}
+              </p>
+            </div>
+            <div className="px-6 py-4">
+              <label className="block text-xs font-medium text-gray-500 mb-1.5">
+                Mode de paiement
+              </label>
+              <select
+                value={finalizeModal.paymentMethod}
+                disabled={finalizeModal.loading}
+                onChange={(e) =>
+                  setFinalizeModal((prev) =>
+                    prev
+                      ? { ...prev, paymentMethod: e.target.value as FinalizePaymentMethod }
+                      : null
+                  )
+                }
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {(Object.keys(PAYMENT_METHOD_LABELS) as FinalizePaymentMethod[]).map((key) => (
+                  <option key={key} value={key}>
+                    {PAYMENT_METHOD_LABELS[key]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="px-6 pb-6 flex flex-col gap-2">
+              <button
+                type="button"
+                disabled={finalizeModal.loading}
+                onClick={handleFinalizeWithCaisse}
+                className="w-full px-4 py-2.5 rounded-full text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                {finalizeModal.loading ? 'Traitement…' : 'Ajouter à la caisse'}
+              </button>
+              <button
+                type="button"
+                disabled={finalizeModal.loading}
+                onClick={handleFinalizeWithoutCaisse}
+                className="w-full px-4 py-2.5 rounded-full text-sm font-medium text-gray-800 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 transition-colors"
+              >
+                Terminé sans caisse
+              </button>
+              <button
+                type="button"
+                disabled={finalizeModal.loading}
+                onClick={closeFinalizeModal}
+                className="w-full px-4 py-2.5 rounded-full text-sm font-medium text-gray-500 hover:text-gray-800 disabled:opacity-50 transition-colors"
+              >
+                Annuler
+              </button>
             </div>
           </div>
         </div>

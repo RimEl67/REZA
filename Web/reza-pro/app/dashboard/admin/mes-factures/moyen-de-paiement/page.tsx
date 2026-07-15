@@ -240,7 +240,7 @@ export default function PaymentMethodsPage() {
       `}</style>
 
       {/* Header - Ultra Minimalist Premium */}
-      <div className="mb-8 animate-slideUp pt-20">
+      <div className="mb-8 animate-slideUp">
         <div className="flex items-center justify-between">
           {/* Left: Title */}
           <div>

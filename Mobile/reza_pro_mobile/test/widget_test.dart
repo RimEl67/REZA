@@ -3,7 +3,7 @@ import 'package:wellbepro_mobile/main.dart';
 
 void main() {
   testWidgets('App smoke test', (WidgetTester tester) async {
-    await tester.pumpWidget(const WellBeProApp());
-    expect(find.byType(WellBeProApp), findsOneWidget);
+    await tester.pumpWidget(const RezaProApp());
+    expect(find.byType(RezaProApp), findsOneWidget);
   });
 }

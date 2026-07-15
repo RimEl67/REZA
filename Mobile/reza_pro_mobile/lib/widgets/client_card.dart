@@ -18,7 +18,7 @@ class ClientCard extends StatelessWidget {
       const Color(0xFFF59E0B),
       const Color(0xFFEF4444),
     ];
-    return colors[client.id % colors.length];
+    return colors[client.id.hashCode.abs() % colors.length];
   }
 
   @override
@@ -227,7 +227,7 @@ class _ClientDetailsSheet extends StatelessWidget {
       const Color(0xFF10B981),
       const Color(0xFFF59E0B),
     ];
-    final avatarColor = colors[client.id % colors.length];
+    final avatarColor = colors[client.id.hashCode.abs() % colors.length];
 
     return DraggableScrollableSheet(
       initialChildSize: 0.75,

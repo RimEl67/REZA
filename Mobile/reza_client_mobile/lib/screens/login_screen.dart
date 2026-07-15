@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../constants.dart';
-import '../providers/auth_provider.dart';
+import '../viewmodels/auth_viewmodel.dart';
 import '../services/api_client.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -85,7 +85,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       builder: (_) => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
     );
     try {
-      await context.read<AuthProvider>().login(
+      await context.read<AuthViewModel>().login(
             _emailController.text.trim(),
             _passwordController.text,
           );
@@ -120,7 +120,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       builder: (_) => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
     );
     try {
-      await context.read<AuthProvider>().register(
+      await context.read<AuthViewModel>().register(
             email: _emailController.text.trim(),
             firstName: _firstNameController.text.trim(),
             lastName: _lastNameController.text.trim(),
