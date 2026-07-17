@@ -42,6 +42,17 @@ type ApiAppointment = {
   status: 'PENDING' | 'CONFIRMED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
   notes?: string | null;
   cancelledBy?: string | null;
+  services?: Array<{
+    id?: string;
+    serviceId?: string | null;
+    name: string;
+    serviceName: string;
+    duration: number;
+    price: number;
+    sortOrder: number;
+  }>;
+  totalDuration?: number;
+  totalPrice?: number;
   client: {
     id: string;
     firstName: string;
@@ -52,7 +63,7 @@ type ApiAppointment = {
   service: {
     id: string;
     name: string;
-    color: string;
+    color?: string;
     duration: number;
     price?: number | null;
     priceFrom?: number | null;
@@ -69,6 +80,14 @@ type Appointment = {
   id: string;
   clientName: string;
   service: string;
+  services?: Array<{
+    id?: string;
+    serviceId?: string | null;
+    name: string;
+    duration: number;
+    price: number;
+    sortOrder: number;
+  }>;
   time: string;
   duration: number;
   status: 'confirmed' | 'pending' | 'cancelled' | 'in_progress' | 'completed' | 'no_show' | string;
@@ -81,11 +100,14 @@ type Appointment = {
   // API IDs for updates
   clientId?: string;
   serviceId?: string;
+  serviceIds?: string[];
   employeeId?: string | null;
   /** Required on create when multi-salon filter is active */
   tenantId?: string;
   /** Catalog price snapshot for caisse */
   servicePrice?: number | null;
+  totalDuration?: number;
+  totalPrice?: number;
 };
 
 type FinalizePaymentMethod = 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK';
@@ -151,12 +173,23 @@ const transformApiAppointment = (apiApt: ApiAppointment): Appointment => {
     'NO_SHOW': 'no_show'
   };
   
+  const services = (apiApt.services || []).map((service) => ({
+    id: service.id,
+    serviceId: service.serviceId ?? null,
+    name: service.name || service.serviceName,
+    duration: service.duration,
+    price: service.price,
+    sortOrder: service.sortOrder,
+  }));
+
   return {
     id: apiApt.id,
     clientName: `${apiApt.client.firstName} ${apiApt.client.lastName}`,
-    service: apiApt.service.name,
+    service: services.length > 0 ? services[0].name : apiApt.service.name,
+    services,
+    serviceIds: services.map((service) => service.serviceId ?? service.id ?? '').filter(Boolean),
     time,
-    duration: apiApt.duration,
+    duration: apiApt.totalDuration ?? apiApt.duration,
     status: statusMap[apiApt.status] || apiApt.status.toLowerCase(),
     employee: apiApt.employee ? `${apiApt.employee.firstName} ${apiApt.employee.lastName}` : 'Non assigné',
     phone: apiApt.client.phone || undefined,
@@ -169,6 +202,8 @@ const transformApiAppointment = (apiApt: ApiAppointment): Appointment => {
     employeeId: apiApt.employeeId,
     tenantId: apiApt.tenantId,
     servicePrice: apiApt.service.price ?? apiApt.service.priceFrom ?? null,
+    totalDuration: apiApt.totalDuration ?? apiApt.duration,
+    totalPrice: apiApt.totalPrice ?? (apiApt.service.price ?? apiApt.service.priceFrom ?? null),
   };
 };
 
@@ -208,9 +243,16 @@ const transformToApiAppointment = (apt: Appointment, date: Date, time: string): 
     'no_show': 'NO_SHOW'
   };
   
+  const serviceIds = (apt.serviceIds && apt.serviceIds.length > 0
+    ? apt.serviceIds
+    : apt.serviceId
+      ? [apt.serviceId]
+      : []);
+
   return {
     clientId: apt.clientId!,
-    serviceId: apt.serviceId!,
+    ...(serviceIds.length > 0 ? { serviceIds } : {}),
+    ...(apt.serviceId ? { serviceId: apt.serviceId } : {}),
     employeeId: apt.employeeId || undefined,
     startTime: startTimeISO,
     duration: apt.duration,
@@ -305,6 +347,7 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
   const [time, setTime] = useState(initialTime || '');
   const [service, setService] = useState('');
   const [serviceId, setServiceId] = useState('');
+  const [serviceIds, setServiceIds] = useState<string[]>([]);
   const [duration, setDuration] = useState('');
   const [employee, setEmployee] = useState('');
   const [employeeId, setEmployeeId] = useState('');
@@ -405,7 +448,7 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
       setTimeout(() => setCreateError(null), 3000);
       return;
     }
-    if (!date || !time || !serviceId || !duration || !selectedClient) {
+    if (!date || !time || serviceIds.length === 0 || !duration || !selectedClient) {
       setCreateError('Veuillez remplir tous les champs obligatoires');
       setTimeout(() => setCreateError(null), 3000);
       return;
@@ -424,9 +467,11 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
       normalizedTime = time.padStart(2, '0') + ':00';
     }
 
-    // Get service name
-    const selectedService = services.find(s => s.id === serviceId);
-    const serviceName = selectedService?.name || service;
+    // Get selected services
+    const selectedServiceObjects = services.filter(s => serviceIds.includes(s.id));
+    const serviceName = selectedServiceObjects.length > 0
+      ? selectedServiceObjects.map((s) => s.name).join(', ')
+      : service;
 
     // Get employee name
     const selectedEmployee = employees.find(e => e.id === employeeId);
@@ -446,7 +491,8 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
       date: normalizedDate,
       notes,
       clientId: selectedClient.id,
-      serviceId: serviceId,
+      serviceId: serviceIds[0] || serviceId,
+      serviceIds,
       employeeId: employeeId || null,
       tenantId: createTenantId || undefined,
     };
@@ -505,16 +551,24 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
     ? employees.filter(emp => isEmployeeAvailable(emp.id, date, time))
     : employees;
   
-  // Update duration when service changes
+  // Update duration and label when services change
   useEffect(() => {
-    if (serviceId) {
-      const selectedService = services.find(s => s.id === serviceId);
+    const selectedServiceObjects = services.filter((s) => serviceIds.includes(s.id));
+    if (selectedServiceObjects.length > 0) {
+      const totalDuration = selectedServiceObjects.reduce((sum, s) => sum + s.duration, 0);
+      setDuration(totalDuration.toString());
+      setService(selectedServiceObjects.map((s) => s.name).join(', '));
+      if (serviceId && !selectedServiceObjects.some((s) => s.id === serviceId)) {
+        setServiceId(selectedServiceObjects[0].id);
+      }
+    } else if (serviceId) {
+      const selectedService = services.find((s) => s.id === serviceId);
       if (selectedService) {
         setDuration(selectedService.duration.toString());
         setService(selectedService.name);
       }
     }
-  }, [serviceId, services]);
+  }, [serviceId, serviceIds, services]);
   
   // Reset employee selection if selected employee becomes unavailable
   useEffect(() => {
@@ -558,6 +612,7 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
                 setSelectedClient(null);
                 setClientSearch('');
                 setServiceId('');
+                setServiceIds([]);
                 setEmployeeId('');
               }}
             >
@@ -693,20 +748,28 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
             </div>
           ) : null}
 
-          {/* Service */}
+          {/* Services */}
           <div className="space-y-2">
-            <Label htmlFor="service">Service</Label>
+            <Label htmlFor="service">Services</Label>
             <ReactSelect
               instanceId="service-select"
               isLoading={loading}
               isDisabled={loading || services.length === 0}
-              placeholder={loading ? "Chargement..." : "Sélectionner un service"}
+              placeholder={loading ? "Chargement..." : "Sélectionner un ou plusieurs services"}
               noOptionsMessage={() =>"Aucun service trouvé"}
-              options={services.map(s => ({ value: s.id, label: `${s.name} (${s.duration} min)`, service: s }))}
-              onChange={(option: any) => {
-                setServiceId(option ? option.value : '');
+              isMulti
+              options={services.map((s) => ({ value: s.id, label: `${s.name} (${s.duration} min)`, service: s }))}
+              onChange={(options: any) => {
+                const nextValues = (options || []).map((option: any) => option.value);
+                setServiceIds(nextValues);
+                setServiceId(nextValues[0] || '');
               }}
-              value={serviceId ? { value: serviceId, label: `${services.find(s => s.id === serviceId)?.name} (${services.find(s => s.id === serviceId)?.duration} min)` } : null}
+              value={(serviceIds.length > 0 ? serviceIds : serviceId ? [serviceId] : []).map((id) => {
+                const selectedService = services.find((s) => s.id === id);
+                return selectedService
+                  ? { value: selectedService.id, label: `${selectedService.name} (${selectedService.duration} min)`, service: selectedService }
+                  : null;
+              }).filter(Boolean) as any[]}
               className="mt-2 text-sm"
               styles={{
                 control: (base) => ({
@@ -896,7 +959,11 @@ const AppointmentCard: React.FC<AppointmentCardProps> = ({
         );
       case 'services':
         return (
-          <p key={field.id} className="text-xs opacity-60 truncate break-words w-full mt-0.5">{apt.service}</p>
+          <p key={field.id} className="text-xs opacity-60 truncate break-words w-full mt-0.5">
+            {apt.services && apt.services.length > 1
+              ? `${apt.services.length} services • ${apt.duration} min`
+              : apt.service}
+          </p>
         );
       case 'notes':
         return apt.notes ? (
@@ -1668,13 +1735,21 @@ const RendezVousPage = () => {
       return;
     }
 
-    if (!apt.serviceId) {
+    const servicesForSale = (apt.services && apt.services.length > 0 ? apt.services : apt.serviceId ? [{ serviceId: apt.serviceId, name: apt.service, duration: apt.duration, price: apt.servicePrice ?? 0, sortOrder: 0 }] : []);
+    if (servicesForSale.length === 0) {
       toast.error('Service manquant — impossible d’ajouter à la caisse');
       return;
     }
 
-    const price = apt.servicePrice && apt.servicePrice > 0 ? apt.servicePrice : undefined;
-    if (!price) {
+    const items = servicesForSale
+      .map((service) => ({
+        serviceId: service.serviceId || '',
+        price: service.price > 0 ? service.price : undefined,
+        quantity: 1,
+      }))
+      .filter((item) => item.serviceId && item.price !== undefined);
+
+    if (items.length === 0) {
       toast.error('Prix du service manquant. Mettez à jour le catalogue ou encaissez depuis la Caisse.');
       return;
     }
@@ -1683,9 +1758,9 @@ const RendezVousPage = () => {
     try {
       await api.createSale({
         clientId: apt.clientId,
-        items: [{ serviceId: apt.serviceId, price, quantity: 1 }],
+        items,
         paymentMethod: finalizeModal.paymentMethod,
-        notes: apt.service || undefined,
+        notes: servicesForSale.map((service) => service.name).join(', '),
         appointmentId: apt.id,
         ...(apt.tenantId ? { tenantId: apt.tenantId } : {}),
       });
@@ -2401,10 +2476,32 @@ const RendezVousPage = () => {
                 </div>
               </div>
 
-              {/* Service */}
+              {/* Services */}
               <div>
-                <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-3">Service</h3>
-                <p className="text-base text-gray-900">{selectedAppointment.service}</p>
+                <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-3">Services</h3>
+                <div className="space-y-2">
+                  {(selectedAppointment.services && selectedAppointment.services.length > 0 ? selectedAppointment.services : [{ name: selectedAppointment.service, duration: selectedAppointment.duration, price: selectedAppointment.totalPrice ?? selectedAppointment.servicePrice ?? 0, sortOrder: 0 }]).map((service, index) => (
+                    <div key={`${service.name}-${index}`} className="flex items-start justify-between rounded-lg border border-gray-100 px-3 py-2">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{service.name}</p>
+                        <p className="text-xs text-gray-500">{service.duration} min</p>
+                      </div>
+                      <p className="text-sm font-medium text-gray-900">{service.price} MAD</p>
+                    </div>
+                  ))}
+                </div>
+                {(selectedAppointment.totalDuration || selectedAppointment.totalPrice) && (
+                  <div className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                    <div className="flex items-center justify-between">
+                      <span>Durée totale</span>
+                      <span>{selectedAppointment.totalDuration ?? selectedAppointment.duration} min</span>
+                    </div>
+                    <div className="flex items-center justify-between mt-1">
+                      <span>Prix total</span>
+                      <span>{selectedAppointment.totalPrice ?? selectedAppointment.servicePrice ?? 0} MAD</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Status */}
@@ -2500,9 +2597,11 @@ const RendezVousPage = () => {
                 Voulez-vous ajouter cette prestation à la caisse ?
               </p>
               <p className="text-xs text-gray-500 mt-2">
-                {finalizeModal.appointment.clientName} · {finalizeModal.appointment.service}
-                {finalizeModal.appointment.servicePrice
-                  ? ` · ${finalizeModal.appointment.servicePrice} MAD`
+                {finalizeModal.appointment.clientName} · {finalizeModal.appointment.services && finalizeModal.appointment.services.length > 1
+                  ? `${finalizeModal.appointment.services.length} services • ${finalizeModal.appointment.duration} min`
+                  : finalizeModal.appointment.service}
+                {finalizeModal.appointment.totalPrice
+                  ? ` · ${finalizeModal.appointment.totalPrice} MAD`
                   : ''}
               </p>
             </div>

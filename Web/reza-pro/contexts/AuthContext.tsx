@@ -70,7 +70,7 @@ function persistSalonFilter(filter: SalonFilter) {
   const value = filter === 'all' ? ['all'] : filter;
   localStorage.setItem(SALON_FILTER_KEY, JSON.stringify(value));
   api.setSalonFilter(filter);
-}
+} 
 
 interface AuthContextType {
   user: User | null;
@@ -78,9 +78,7 @@ interface AuthContextType {
   activeTenantId: string | null;
   salonFilter: SalonFilter;
   setSalonFilter: (filter: SalonFilter) => void;
-  /** Resolved salon ids for current filter (never empty when salons exist). */
   effectiveSalonIds: string[];
-  /** True when more than one salon is in scope (all or multi-select). */
   isSalonFilterMulti: boolean;
   subscription: SubscriptionInfo | null;
   salonLimit: number;
@@ -242,10 +240,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       return { success: true };
     } catch (error: any) {
-      console.error('[AuthContext] Login error:', error);
+      // Use console.warn to avoid triggering Next.js error overlay
+      console.warn('[AuthContext] Login failed:', error.message);
+
+      // Translate common English backend error messages to French
+      const msgMap: Record<string, string> = {
+        'email or password is incorrect': 'Email ou mot de passe incorrect',
+        'invalid email or password': 'Email ou mot de passe incorrect',
+        'invalid email': 'Adresse email invalide',
+        'invalid password': 'Mot de passe invalide',
+        'invalid credentials': 'Identifiants invalides',
+        'user not found': 'Aucun compte trouvé avec cet email',
+        'account is disabled': 'Votre compte a été désactivé',
+        'account is inactive': 'Votre compte a été désactivé',
+        'email not verified': 'Veuillez vérifier votre email avant de vous connecter',
+        'too many login attempts': 'Trop de tentatives de connexion. Veuillez réessayer plus tard',
+      };
+
+      const rawMessage = (error.message || '').toLowerCase().trim();
+      const frenchMessage =
+        msgMap[rawMessage] ||
+        // Partial match fallback
+        Object.entries(msgMap).find(([key]) => rawMessage.includes(key))?.[1] ||
+        'Email ou mot de passe invalide';
+
       return {
         success: false,
-        error: error.message || 'Email ou mot de passe invalide'
+        error: frenchMessage,
       };
     }
   };

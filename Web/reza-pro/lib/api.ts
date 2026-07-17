@@ -202,8 +202,9 @@ class ApiClient {
     if (!response.ok) {
       // If unauthorized, clear token (but only if we had a token to begin with)
       if (response.status === 401) {
-        // Only clear token if we actually had one - avoids clearing on legitimate "not logged in" scenarios
-        if (this.token || (typeof window !== 'undefined' && localStorage.getItem('token'))) {
+        // Don't clear token on login/register attempts – there's no session to invalidate
+        const isAuthAttempt = endpoint === '/auth/login' || endpoint === '/auth/register';
+        if (!isAuthAttempt && (this.token || (typeof window !== 'undefined' && localStorage.getItem('token')))) {
           console.warn('Token expired or invalid, clearing authentication');
           this.setToken(null);
         }
@@ -288,27 +289,22 @@ class ApiClient {
       }
       return data;
     } catch (error: any) {
-      // Enhanced error logging to handle all error types
+      // Use console.warn (not console.error) to avoid triggering Next.js error overlay
+      // for expected auth failures like wrong credentials
       const errorInfo: any = {
         type: error?.constructor?.name || typeof error,
         message: error?.message || String(error),
         status: error?.status,
         statusText: error?.statusText,
-        name: error?.name,
-        stack: error?.stack,
       };
       
-      // Add fetch-specific error information
       if (error instanceof TypeError && error.message.includes('fetch')) {
         errorInfo.networkError = true;
         errorInfo.details = 'Network error - check if server is running and CORS is configured';
       }
       
-      // Log the full error object for debugging
-      console.error('[API] Login error:', errorInfo);
-      console.error('[API] Full error object:', error);
+      console.warn('[API] Login failed:', errorInfo);
       
-      // Re-throw with a more user-friendly message if needed
       throw error;
     }
   }

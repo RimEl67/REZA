@@ -278,12 +278,12 @@ function LoginPageContent() {
           console.log('[Login] Redirecting to:', redirectUrl);
           router.push(redirectUrl);
         } else {
-          console.error('[Login] Login failed:', result.error);
+          console.warn('[Login] Login failed:', result.error);
           setError(result.error || 'Email ou mot de passe invalide');
           setLoading(false);
         }
       } catch (err: any) {
-        console.error('[Login] Login error:', err);
+        console.warn('[Login] Login error:', err.message);
         setError(err.message || 'Erreur de connexion');
         setLoading(false);
       }
