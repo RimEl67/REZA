@@ -203,6 +203,7 @@ export default function AccountDashboard() {
   // Appointments from API
   const [appointments, setAppointments] = useState<any[]>([]);
   const [clientData, setClientData] = useState<any>(null);
+  const [appointmentsSortBy, setAppointmentsSortBy] = useState<'createdAt' | 'startTime'>('createdAt');
 
   // Family members from API
   const [familyMembers, setFamilyMembers] = useState<any[]>([]);
@@ -267,7 +268,7 @@ export default function AccountDashboard() {
 
         // Fetch appointments and client data
         setLoadingAppointments(true);
-        const appointmentsRes = await api.getClientAppointments(userEmail);
+        const appointmentsRes = await api.getClientAppointments(userEmail, undefined, 100, appointmentsSortBy);
         
         // Debug: log first appointment structure to understand API response
         if (appointmentsRes.appointments && appointmentsRes.appointments.length > 0) {
@@ -596,12 +597,23 @@ export default function AccountDashboard() {
     fetchAccountData();
   }, [isAuthenticated, user?.email, router, authLoading]);
 
+  // Handle sort changes - refetch appointments without full loading state
+  useEffect(() => {
+    // Only run if user is authenticated and has fetched data at least once
+    if (!isAuthenticated || !user?.email || appointments.length === 0) {
+      return;
+    }
+
+    // Call refreshAppointments when sort changes
+    refreshAppointments();
+  }, [appointmentsSortBy]);
+
   // Refresh appointments
   const refreshAppointments = async () => {
     if (!user?.email) return;
     try {
       setLoadingAppointments(true);
-      const appointmentsRes = await api.getClientAppointments(user.email);
+      const appointmentsRes = await api.getClientAppointments(user.email, undefined, 100, appointmentsSortBy);
       
       // Fetch services for all unique serviceIds to get prices
       const uniqueServiceIds = [...new Set((appointmentsRes.appointments || [])
@@ -1333,6 +1345,8 @@ export default function AccountDashboard() {
                   getStatusText={getStatusText}
                   handleAddReview={handleAddReview}
                   onUpdateAppointment={refreshAppointments}
+                  onSortChange={(sortBy) => setAppointmentsSortBy(sortBy)}
+                  currentSort={appointmentsSortBy}
                 />
               )
             )}

@@ -63,6 +63,13 @@ interface Appointment {
   clientPhone?: string;
   email?: string;
   phone?: string;
+  services?: Array<{
+    id: string;
+    serviceId: string;
+    name: string;
+    duration: number;
+    price: number;
+  }>;
 }
 
 interface AppointmentsTabProps {
@@ -73,6 +80,8 @@ interface AppointmentsTabProps {
   timeSlots?: string[];
   salonServices?: Array<{ name: string; duration: string; price: number; [key: string]: any }>;
   onUpdateAppointment?: (id: string, data: any) => void;
+  onSortChange?: (sortBy: 'createdAt' | 'startTime') => void;
+  currentSort?: 'createdAt' | 'startTime';
 }
 
 const AppointmentsTab: React.FC<AppointmentsTabProps> = ({ 
@@ -82,7 +91,9 @@ const AppointmentsTab: React.FC<AppointmentsTabProps> = ({
   salonTeam, 
   timeSlots, 
   salonServices, 
-  onUpdateAppointment
+  onUpdateAppointment,
+  onSortChange,
+  currentSort = 'createdAt'
 }) => {
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [rating, setRating] = useState(0);
@@ -413,36 +424,67 @@ const AppointmentsTab: React.FC<AppointmentsTabProps> = ({
             <div className="lg:col-span-2 space-y-6 sm:space-y-8">
               {/* Service Details */}
               <div className="bg-[#f5f7f3] rounded-2xl sm:rounded-3xl p-5 sm:p-6 lg:p-8 xl:p-10 border border-gray-200">
-                <div className="flex items-start justify-between mb-8">
-                  <div className="flex-1">
-                    <div className="text-xs font-light tracking-widest text-gray-400 uppercase mb-3">
-                      Service
-                    </div>
-                    <h2 className="text-2xl font-light text-gray-900 mb-3">
-                      {selectedAppointment.service}
-                    </h2>
-                    {selectedAppointment.serviceDescription && (
-                      <p className="text-sm text-gray-500 leading-relaxed font-light">
-                        {selectedAppointment.serviceDescription}
-                      </p>
+                <div className="text-xs font-light tracking-widest text-gray-400 uppercase mb-6">
+                  {selectedAppointment.services && selectedAppointment.services.length > 1 ? 'Services' : 'Service'}
+                </div>
+                
+                {selectedAppointment.services && selectedAppointment.services.length > 0 ? (
+                  <div className="space-y-6">
+                    {selectedAppointment.services.map((svc, index) => (
+                      <div key={svc.id || index} className="flex items-start justify-between pb-6 border-b border-gray-200 last:border-b-0 last:pb-0">
+                        <div className="flex-1">
+                          <h2 className="text-xl sm:text-2xl font-light text-gray-900 mb-2">
+                            {svc.name}
+                          </h2>
+                          <div className="text-sm text-gray-500 font-light">
+                            Durée: {svc.duration} min
+                          </div>
+                        </div>
+                        <div className="text-right ml-4">
+                          <div className="text-2xl sm:text-3xl font-extralight text-gray-900">{svc.price}</div>
+                          <div className="text-xs text-gray-400 font-light tracking-wide mt-1">MAD</div>
+                        </div>
+                      </div>
+                    ))}
+                    
+                    {/* Total Duration */}
+                    {selectedAppointment.services.length > 1 && (
+                      <div className="pt-6 border-t border-gray-200">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-xs text-gray-400 font-light tracking-wide mb-1">DURÉE TOTALE</div>
+                            <div className="text-lg font-light text-gray-900">
+                              {selectedAppointment.services.reduce((sum, s) => sum + s.duration, 0)} minutes
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-gray-400 font-light tracking-wide mb-1">PRIX TOTAL</div>
+                            <div className="text-lg font-light text-gray-900">
+                              {selectedAppointment.services.reduce((sum, s) => sum + s.price, 0)} MAD
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     )}
                   </div>
-                  <div className="text-right">
-                    <div className="text-2xl sm:text-3xl font-extralight text-gray-900">{selectedAppointment.price || 0}</div>
-                    <div className="text-xs text-gray-400 font-light tracking-wide mt-1">MAD</div>
+                ) : (
+                  <div className="flex items-start justify-between mb-8">
+                    <div className="flex-1">
+                      <h2 className="text-2xl font-light text-gray-900 mb-3">
+                        {selectedAppointment.service}
+                      </h2>
+                      {selectedAppointment.serviceDescription && (
+                        <p className="text-sm text-gray-500 leading-relaxed font-light">
+                          {selectedAppointment.serviceDescription}
+                        </p>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <div className="text-2xl sm:text-3xl font-extralight text-gray-900">{selectedAppointment.price || 0}</div>
+                      <div className="text-xs text-gray-400 font-light tracking-wide mt-1">MAD</div>
+                    </div>
                   </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 pt-6 sm:pt-8 border-t border-gray-200">
-                  <div>
-                    <div className="text-xs text-gray-400 font-light tracking-wide mb-2">DURÉE ESTIMÉE</div>
-                    <div className="text-lg font-light text-gray-900">{selectedAppointment.duration || '60 minutes'}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-400 font-light tracking-wide mb-2">CATÉGORIE</div>
-                    <div className="text-lg font-light text-gray-900">Soins & Beauté</div>
-                  </div>
-                </div>
+                )}
               </div>
 
               {/* Date & Time Detailed */}
@@ -757,10 +799,25 @@ const AppointmentsTab: React.FC<AppointmentsTabProps> = ({
                 </div>
                 
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-600 font-light">Service</span>
-                    <span className="text-sm text-gray-900 font-light">{selectedAppointment.price || 0} MAD</span>
-                  </div>
+                  {/* Services List */}
+                  {selectedAppointment.services && selectedAppointment.services.length > 0 ? (
+                    <>
+                      {selectedAppointment.services.map((svc, index) => (
+                        <div key={svc.id || index} className="flex items-start justify-between gap-2">
+                          <div className="flex-1">
+                            <span className="text-sm text-gray-900 font-light block">{svc.name}</span>
+                            <span className="text-xs text-gray-500 font-light">{svc.duration} min</span>
+                          </div>
+                          <span className="text-sm text-gray-900 font-light whitespace-nowrap">{svc.price} MAD</span>
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600 font-light">Service</span>
+                      <span className="text-sm text-gray-900 font-light">{selectedAppointment.price || 0} MAD</span>
+                    </div>
+                  )}
                   
                   {selectedAppointment.discount && (
                     <div className="flex items-center justify-between">
@@ -944,7 +1001,7 @@ const AppointmentsTab: React.FC<AppointmentsTabProps> = ({
   // List view
   return (
     <div className="space-y-8 animate-fadeIn">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h2 className="text-xl sm:text-2xl font-extralight text-gray-900 tracking-tight mb-2">Rendez-vous</h2>
           <p className="text-xs text-gray-400 tracking-wide font-light">
@@ -952,6 +1009,21 @@ const AppointmentsTab: React.FC<AppointmentsTabProps> = ({
             {appointments.length > PAGE_SIZE ? ` · page ${safePage}/${totalPages}` : ''}
           </p>
         </div>
+        
+        {/* Sort Filter */}
+        {onSortChange && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 font-light">Trier par:</span>
+            <select
+              value={currentSort}
+              onChange={(e) => onSortChange(e.target.value as 'createdAt' | 'startTime')}
+              className="px-3 py-2 text-xs bg-white border border-gray-200 rounded-full text-gray-900 font-light focus:outline-none focus:border-gray-900 transition-colors cursor-pointer"
+            >
+              <option value="createdAt">Date de réservation</option>
+              <option value="startTime">Date du rendez-vous</option>
+            </select>
+          </div>
+        )}
       </div>
 
       <div className="space-y-4">

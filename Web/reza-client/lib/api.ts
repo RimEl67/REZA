@@ -153,10 +153,11 @@ class ApiClient {
   }
 
   // Get client appointments by email
-  async getClientAppointments(email: string, status?: string, limit: number = 100) {
+  async getClientAppointments(email: string, status?: string, limit: number = 100, sortBy?: 'createdAt' | 'startTime') {
     const params = new URLSearchParams();
     if (status) params.append('status', status);
     params.append('limit', limit.toString());
+    if (sortBy) params.append('sortBy', sortBy);
     return this.request<{ appointments: any[]; client: any }>(
       `/public/client/${encodeURIComponent(email)}/appointments?${params.toString()}`
     );
