@@ -6,7 +6,7 @@ import { fail } from '../utils/http';
 export class ClientAppointmentsService {
   async getClientAppointments(email: string, query: Record<string, unknown>) {
     try {
-    const { status, limit = '100' } = query;
+    const { status, limit = '100', sortBy = 'createdAt' } = query;
 
     if (!email) {
       fail(400, {
@@ -74,7 +74,7 @@ export class ClientAppointmentsService {
     const appointments = await prisma.appointment.findMany({
       where,
       take: parseInt(limit as string),
-      orderBy: { startTime: 'desc' },
+      orderBy: sortBy === 'startTime' ? { startTime: 'desc' } : { createdAt: 'desc' },
       include: {
         service: {
           select: {
@@ -84,6 +84,17 @@ export class ClientAppointmentsService {
             price: true,
             priceType: true,
             category: true
+          }
+        },
+        services: {
+          orderBy: { sortOrder: 'asc' },
+          select: {
+            id: true,
+            serviceId: true,
+            serviceName: true,
+            duration: true,
+            price: true,
+            sortOrder: true
           }
         },
         employee: {
@@ -189,17 +200,47 @@ export class ClientAppointmentsService {
       // Format date and time consistently using utility function (handles timezone correctly)
       const { date: dateStr, time: timeStr } = formatDateTimeForAPI(apt.startTime.toISOString());
 
+      // Calculate total price and service names from service items
+      const serviceItems = apt.services || [];
+      const totalPrice = serviceItems.length > 0
+        ? serviceItems.reduce((sum, item) => sum + (item.price || 0), 0)
+        : (apt.service?.price || 0);
+      
+      const serviceName = serviceItems.length > 1
+        ? `${serviceItems[0].serviceName} +${serviceItems.length - 1}`
+        : serviceItems.length === 1
+          ? serviceItems[0].serviceName
+          : (apt.service?.name || 'Service');
+
+      // Prepare detailed services array for the details page
+      const detailedServices = serviceItems.length > 0
+        ? serviceItems.map(item => ({
+            id: item.id,
+            serviceId: item.serviceId,
+            name: item.serviceName,
+            duration: item.duration,
+            price: item.price
+          }))
+        : [{
+            id: apt.service?.id,
+            serviceId: apt.service?.id,
+            name: apt.service?.name || 'Service',
+            duration: apt.service?.duration || apt.duration,
+            price: apt.service?.price || 0
+          }];
+
       return {
         id: apt.id,
         salon: apt.tenant?.name || 'Salon',
         salonId: apt.tenantId,
         tenantId: apt.tenantId,
-        service: apt.service?.name || 'Service',
+        service: serviceName,
         serviceId: apt.serviceId,
+        services: detailedServices,
         date: dateStr,
         time: timeStr,
         status: statusMap[apt.status] || apt.status.toLowerCase(),
-        price: apt.service?.price || 0,
+        price: totalPrice,
         duration: durationFormatted,
         professional: professionalName,
         employeeId: apt.employeeId,
@@ -210,7 +251,8 @@ export class ClientAppointmentsService {
         clientFirstName: client.firstName,
         clientLastName: client.lastName,
         clientEmail: client.email,
-        clientPhone: client.phone
+        clientPhone: client.phone,
+        startTime: apt.startTime.toISOString()
       };
     }));
 

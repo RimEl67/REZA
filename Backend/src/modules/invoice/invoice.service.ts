@@ -14,20 +14,8 @@ const invoiceListInclude = {
     }
   },
   appointment: {
-    select: {
-      id: true,
-      startTime: true,
-      service: {
-        select: {
-          name: true
-        }
-      },
-      employee: {
-        select: {
-          firstName: true,
-          lastName: true
-        }
-      }
+    include: {
+      services: true
     }
   },
   items: {
@@ -168,9 +156,12 @@ export class InvoiceService {
       throw new Error('CLIENT_WRONG_SALON');
     }
 
+    let resolvedItems: Array<{ serviceId: string | null; serviceName: string; price: number; quantity: number }> = [];
+
     if (data.appointmentId) {
       const appointment = await prisma.appointment.findFirst({
-        where: { id: data.appointmentId, tenantId }
+        where: { id: data.appointmentId, tenantId },
+        include: { services: true }
       });
       if (!appointment) {
         throw new Error('APPOINTMENT_NOT_FOUND');
@@ -184,40 +175,47 @@ export class InvoiceService {
       if (existingInvoice) {
         throw new Error('APPOINTMENT_ALREADY_INVOICED');
       }
-    }
 
-    const serviceIds = data.items.map((i) => i.serviceId);
-    const services = await prisma.service.findMany({
-      where: {
-        id: { in: serviceIds },
-        tenantId
+      resolvedItems = appointment.services.map((item) => ({
+        serviceId: item.serviceId,
+        serviceName: item.serviceName,
+        price: item.price,
+        quantity: 1
+      }));
+    } else {
+      const serviceIds = data.items.map((i) => i.serviceId);
+      const services = await prisma.service.findMany({
+        where: {
+          id: { in: serviceIds },
+          tenantId
+        }
+      });
+
+      if (services.length !== new Set(serviceIds).size) {
+        throw new Error('SERVICE_NOT_FOUND');
       }
-    });
 
-    if (services.length !== new Set(serviceIds).size) {
-      throw new Error('SERVICE_NOT_FOUND');
+      const serviceById = new Map(services.map((s) => [s.id, s]));
+
+      resolvedItems = data.items.map((item) => {
+        const service = serviceById.get(item.serviceId)!;
+        const unitPrice =
+          item.price ??
+          service.price ??
+          service.priceFrom ??
+          0;
+        if (unitPrice <= 0) {
+          throw new Error('SERVICE_PRICE_REQUIRED');
+        }
+        const quantity = item.quantity ?? 1;
+        return {
+          serviceId: service.id,
+          serviceName: service.name,
+          price: unitPrice,
+          quantity
+        };
+      });
     }
-
-    const serviceById = new Map(services.map((s) => [s.id, s]));
-
-    const resolvedItems = data.items.map((item) => {
-      const service = serviceById.get(item.serviceId)!;
-      const unitPrice =
-        item.price ??
-        service.price ??
-        service.priceFrom ??
-        0;
-      if (unitPrice <= 0) {
-        throw new Error('SERVICE_PRICE_REQUIRED');
-      }
-      const quantity = item.quantity ?? 1;
-      return {
-        serviceId: service.id,
-        serviceName: service.name,
-        price: unitPrice,
-        quantity
-      };
-    });
 
     const itemsSum = resolvedItems.reduce(
       (sum, item) => sum + item.price * item.quantity,

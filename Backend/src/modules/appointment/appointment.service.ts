@@ -1,10 +1,35 @@
 import { prisma } from '../../lib/prisma';
 import { validateAppointmentRules } from '../../utils/schedulingValidation';
-import { resolveEmployeeUserId } from '../../utils/resolveEmployeeUserId';
 import { formatDateForNotification } from '../../utils/dateTime';
 import { tenantIdFilter } from '../../utils/salonScope';
+import {
+  getServicePrice,
+  serializeAppointmentWithServices,
+  stripGeneratedServicesNotes,
+} from '../../utils/appointmentServiceItems';
 
 const ACTIVE_APPOINTMENT_STATUSES = new Set(['PENDING', 'CONFIRMED', 'IN_PROGRESS']);
+
+const serviceSelect = {
+  id: true,
+  name: true,
+  color: true,
+  duration: true,
+  price: true,
+  priceFrom: true,
+  onQuote: true,
+};
+
+const appointmentListInclude = {
+  client: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+  service: { select: serviceSelect },
+  services: {
+    orderBy: { sortOrder: 'asc' as const },
+    include: { service: { select: serviceSelect } },
+  },
+  employee: { select: { id: true, firstName: true, lastName: true } },
+  createdBy: { select: { id: true, firstName: true, lastName: true } },
+};
 
 function throwValidationError(details: {
   status?: number;
@@ -17,6 +42,28 @@ function throwValidationError(details: {
 }
 
 export class AppointmentService {
+  private getRequestedServiceIds(data: any) {
+    const ids =
+      data.serviceIds ||
+      data.services?.map((service: any) => service.serviceId) ||
+      (data.serviceId ? [data.serviceId] : []);
+    return [...new Set(ids.filter(Boolean))] as string[];
+  }
+
+  private async resolveServices(tenantId: string, data: any) {
+    const serviceIds = this.getRequestedServiceIds(data);
+    if (serviceIds.length === 0) throw new Error('SERVICE_NOT_FOUND');
+
+    const services = await prisma.service.findMany({
+      where: { id: { in: serviceIds }, tenantId },
+    });
+
+    if (services.length !== serviceIds.length) throw new Error('SERVICE_NOT_FOUND');
+
+    const byId = new Map(services.map((service) => [service.id, service]));
+    return serviceIds.map((id) => byId.get(id)!);
+  }
+
   async getAppointments(tenantIds: string | string[], filters: any, page: number = 1, limit: number = 50) {
     const skip = (page - 1) * limit;
     const take = limit;
@@ -38,7 +85,12 @@ export class AppointmentService {
 
     if (filters.clientId) where.clientId = filters.clientId;
     if (filters.employeeId) where.employeeId = filters.employeeId;
-    if (filters.serviceId) where.serviceId = filters.serviceId;
+    if (filters.serviceId) {
+      where.OR = [
+        { serviceId: filters.serviceId },
+        { services: { some: { serviceId: filters.serviceId } } },
+      ];
+    }
     if (filters.status) where.status = filters.status;
 
     const [appointments, total] = await Promise.all([
@@ -47,89 +99,85 @@ export class AppointmentService {
         skip,
         take,
         orderBy: { startTime: 'asc' },
-        include: {
-          client: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
-          service: {
-            select: {
-              id: true,
-              name: true,
-              color: true,
-              duration: true,
-              price: true,
-              priceFrom: true
-            }
-          },
-          employee: { select: { id: true, firstName: true, lastName: true } },
-          createdBy: { select: { id: true, firstName: true, lastName: true } }
-        }
+        include: appointmentListInclude,
       }),
-      prisma.appointment.count({ where })
+      prisma.appointment.count({ where }),
     ]);
 
-    return { appointments, total, page, limit, totalPages: Math.ceil(total / take) };
+    return {
+      appointments: appointments.map(serializeAppointmentWithServices),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / take),
+    };
   }
 
   async getAppointmentById(tenantIds: string | string[], id: string) {
-    return prisma.appointment.findFirst({
+    const appointment = await prisma.appointment.findFirst({
       where: { id, tenantId: tenantIdFilter(tenantIds) },
       include: {
         client: true,
         service: true,
+        services: { orderBy: { sortOrder: 'asc' }, include: { service: true } },
         employee: true,
         createdBy: { select: { id: true, firstName: true, lastName: true } },
-        invoice: true
-      }
+        invoice: true,
+      },
     });
+    return appointment ? serializeAppointmentWithServices(appointment) : null;
   }
 
   async createAppointment(tenantId: string, createdById: string, data: any, isPublicBooking: boolean = false) {
     const startTime = new Date(data.startTime);
-    const endTime = new Date(startTime.getTime() + data.duration * 60000);
 
     const client = await prisma.client.findFirst({ where: { id: data.clientId, tenantId } });
     if (!client) throw new Error('CLIENT_NOT_FOUND');
 
-    const service = await prisma.service.findFirst({ where: { id: data.serviceId, tenantId } });
-    if (!service) throw new Error('SERVICE_NOT_FOUND');
-
-    let userIdForAppointment: string | null = null;
-    if (data.employeeId) {
-      userIdForAppointment = await resolveEmployeeUserId(tenantId, data.employeeId);
-      if (!userIdForAppointment) throw new Error('INVALID_EMPLOYEE');
-    }
+    const services = await this.resolveServices(tenantId, data);
+    const serviceIds = services.map((service) => service.id);
+    const duration = services.reduce((sum, service) => sum + service.duration, 0);
+    const endTime = new Date(startTime.getTime() + duration * 60000);
+    const primaryService = services[0];
 
     const validationResult = await validateAppointmentRules({
       tenantId,
-      employeeId: userIdForAppointment,
-      serviceIds: [data.serviceId],
+      employeeId: null,
+      serviceIds,
       startTime,
       endTime,
       isPublicBooking,
+      validateServiceCompatibility: false,
     });
 
-    if (!validationResult.isValid) {
-      throwValidationError(validationResult);
-    }
+    if (!validationResult.isValid) throwValidationError(validationResult);
 
-    return prisma.appointment.create({
+    const appointment = await prisma.appointment.create({
       data: {
         tenantId,
         clientId: data.clientId,
-        serviceId: data.serviceId,
-        employeeId: userIdForAppointment,
+        serviceId: primaryService.id,
+        employeeId: null,
         createdById,
         startTime,
         endTime,
-        duration: data.duration,
+        duration,
         status: data.status || 'CONFIRMED',
-        notes: data.notes
+        notes: stripGeneratedServicesNotes(data.notes),
+        services: {
+          create: services.map((service, index) => ({
+            serviceId: service.id,
+            serviceName: service.name,
+            duration: service.duration,
+            price: getServicePrice(service),
+            sortOrder: index,
+          })),
+        },
       },
-      include: {
-        client: true,
-        service: true,
-        employee: true
-      }
+      include: appointmentListInclude,
     });
+
+    return serializeAppointmentWithServices(appointment);
   }
 
   async updateAppointment(tenantIds: string | string[], id: string, data: any) {
@@ -140,79 +188,75 @@ export class AppointmentService {
     const tenantId = existing.tenantId;
 
     const updateData: any = { ...data };
-
-    if (data.employeeId !== undefined) {
-      if (data.employeeId) {
-        const userIdForAppointment = await resolveEmployeeUserId(tenantId, data.employeeId);
-        updateData.employeeId = userIdForAppointment;
-      } else {
-        updateData.employeeId = null;
-      }
-    }
+    const servicesChanged =
+      data.serviceId !== undefined ||
+      data.serviceIds !== undefined ||
+      data.services !== undefined;
+    const nextServices = servicesChanged ? await this.resolveServices(tenantId, data) : null;
 
     const startTime = data.startTime ? new Date(data.startTime) : existing.startTime;
-    const duration = data.duration ?? existing.duration;
+    const duration = nextServices
+      ? nextServices.reduce((sum, service) => sum + service.duration, 0)
+      : data.duration ?? existing.duration;
     const endTime = new Date(startTime.getTime() + duration * 60000);
-    updateData.startTime = startTime;
-    updateData.duration = duration;
-    updateData.endTime = endTime;
-
-    const employeeUserId =
-      updateData.employeeId !== undefined ? updateData.employeeId : existing.employeeId;
-    const serviceId = data.serviceId ?? existing.serviceId;
     const nextStatus = data.status ?? existing.status;
-
-    const resolvedEmployeeId =
-      data.employeeId !== undefined
-        ? updateData.employeeId
-        : existing.employeeId;
-    const employeeChanged =
-      data.employeeId !== undefined && resolvedEmployeeId !== existing.employeeId;
-    const serviceChanged =
-      data.serviceId !== undefined && data.serviceId !== existing.serviceId;
     const timeChanged =
       (data.startTime !== undefined &&
         new Date(data.startTime).getTime() !== existing.startTime.getTime()) ||
       (data.duration !== undefined && data.duration !== existing.duration);
-    // Status-only updates must not re-run create/reschedule rules (business hours, overlap).
-    const scheduleChanged = timeChanged || employeeChanged || serviceChanged;
+    const scheduleChanged = timeChanged || servicesChanged;
 
-    if (
-      scheduleChanged &&
-      employeeUserId &&
-      ACTIVE_APPOINTMENT_STATUSES.has(nextStatus)
-    ) {
+    if (scheduleChanged && ACTIVE_APPOINTMENT_STATUSES.has(nextStatus)) {
       const validationResult = await validateAppointmentRules({
         tenantId,
-        employeeId: employeeUserId,
-        serviceIds: [serviceId],
+        employeeId: null,
+        serviceIds: nextServices?.map((service) => service.id) ?? [existing.serviceId],
         startTime,
         endTime,
         isPublicBooking: false,
         excludeAppointmentId: id,
-        validateServiceCompatibility: employeeChanged || serviceChanged,
+        validateServiceCompatibility: false,
       });
 
-      if (!validationResult.isValid) {
-        throwValidationError(validationResult);
-      }
+      if (!validationResult.isValid) throwValidationError(validationResult);
+    }
+
+    updateData.startTime = startTime;
+    updateData.duration = duration;
+    updateData.endTime = endTime;
+    updateData.employeeId = null;
+    if (data.notes !== undefined) updateData.notes = stripGeneratedServicesNotes(data.notes);
+    delete updateData.serviceIds;
+    delete updateData.services;
+
+    if (nextServices) {
+      updateData.serviceId = nextServices[0].id;
+      updateData.services = {
+        deleteMany: {},
+        create: nextServices.map((service, index) => ({
+          serviceId: service.id,
+          serviceName: service.name,
+          duration: service.duration,
+          price: getServicePrice(service),
+          sortOrder: index,
+        })),
+      };
     }
 
     const appointment = await prisma.appointment.update({
       where: { id },
       data: updateData,
       include: {
-        client: true,
-        service: true,
-        employee: true,
-        tenant: { select: { id: true, name: true } }
-      }
+        ...appointmentListInclude,
+        tenant: { select: { id: true, name: true } },
+      },
     });
 
     if (data.status === 'CONFIRMED' && existing.status !== 'CONFIRMED') {
       try {
         const tenantSettings = await prisma.tenantSettings.findUnique({
-          where: { tenantId }, select: { timezone: true }
+          where: { tenantId },
+          select: { timezone: true },
         });
         const timezone = tenantSettings?.timezone || 'Africa/Casablanca';
         const appointmentDate = formatDateForNotification(appointment.startTime.toISOString(), timezone);
@@ -222,22 +266,22 @@ export class AppointmentService {
             tenantId,
             userId: null,
             type: 'APPOINTMENT_CONFIRMED',
-            title: 'Rendez-vous confirmé',
-            message: `Votre rendez-vous pour "${appointment.service.name}" le ${appointmentDate} a été confirmé par ${appointment.tenant.name}.`,
+            title: 'Rendez-vous confirme',
+            message: `Votre rendez-vous pour "${appointment.service.name}" le ${appointmentDate} a ete confirme par ${appointment.tenant.name}.`,
             link: null,
             metadata: {
               appointmentId: appointment.id,
               clientId: appointment.clientId,
-              tenantId
-            }
-          }
+              tenantId,
+            },
+          },
         });
       } catch (e) {
         console.error('Error creating appointment confirmation notification:', e);
       }
     }
 
-    return appointment;
+    return serializeAppointmentWithServices(appointment);
   }
 
   async deleteAppointment(tenantIds: string | string[], id: string, userId: string) {
@@ -256,8 +300,8 @@ export class AppointmentService {
       data: {
         status: 'CANCELLED',
         cancelledAt: new Date(),
-        cancelledBy: userId
-      }
+        cancelledBy: userId,
+      },
     });
   }
 }

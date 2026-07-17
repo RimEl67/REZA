@@ -1,6 +1,7 @@
 import { prisma } from '../../../lib/prisma';
 import { formatDateForNotification } from '../../../utils/dateTime';
 import { validateAppointmentRules } from '../../../utils/schedulingValidation';
+import { getServicePrice, stripGeneratedServicesNotes } from '../../../utils/appointmentServiceItems';
 import { fail } from '../utils/http';
 import { createPublicBookingSchema } from '../schemas/public.schema';
 import type { Service } from '../../../../prisma/generated/prisma/client';
@@ -15,13 +16,6 @@ type ResolvedParticipant = {
   duration: number;
   subtotal: number;
 };
-
-function getServicePrice(service: Service): number {
-  if (service.onQuote) return 0;
-  if (service.price != null) return service.price;
-  if (service.priceFrom != null) return service.priceFrom;
-  return 0;
-}
 
 function buildServicesList(services: Service[]): string {
   return services
@@ -253,12 +247,12 @@ export class BookingService {
       for (const participant of resolved) {
         const end = new Date(start.getTime() + participant.duration * 60000);
         const servicesList = buildServicesList(participant.services);
-        let appointmentNotes = notes
-          ? `${notes}\n\nServices réservés: ${servicesList}`
-          : `Services réservés: ${servicesList}`;
+        let appointmentNotes = notes?.trim() || '';
 
         if (!participant.isBooker) {
-          appointmentNotes = `Participant: ${participant.displayName}\n${appointmentNotes}`;
+          appointmentNotes = appointmentNotes
+            ? `Participant: ${participant.displayName}\n${appointmentNotes}`
+            : `Participant: ${participant.displayName}`;
         }
 
         const appointment = await prisma.appointment.create({
@@ -272,8 +266,17 @@ export class BookingService {
             endTime: end,
             duration: participant.duration,
             status: 'PENDING',
-            notes: appointmentNotes,
+            notes: appointmentNotes || null,
             bookingGroupId: bookingGroup.id,
+            services: {
+              create: participant.services.map((service, index) => ({
+                serviceId: service.id,
+                serviceName: service.name,
+                duration: service.duration,
+                price: getServicePrice(service),
+                sortOrder: index,
+              })),
+            },
           },
           include: {
             client: {
