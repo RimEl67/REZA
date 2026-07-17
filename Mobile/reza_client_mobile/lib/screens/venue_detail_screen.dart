@@ -15,11 +15,15 @@ import 'login_screen.dart';
 class VenueDetailScreen extends StatefulWidget {
   final String tenantId;
   final ServiceItem? preselectedService;
+  /// When provided, forwarded through BookingScreen → BookingConfirmationScreen
+  /// so "Voir mes réservations" navigates to the Mes RDV tab.
+  final VoidCallback? onGoToBookings;
 
   const VenueDetailScreen({
     super.key,
     required this.tenantId,
     this.preselectedService,
+    this.onGoToBookings,
   });
 
   @override
@@ -166,6 +170,7 @@ class _VenueDetailScreenState extends State<VenueDetailScreen> {
           tenantId: widget.tenantId,
           venue: venue.copyWithServices(_services),
           preselectedService: service ?? widget.preselectedService,
+          onGoToBookings: widget.onGoToBookings,
         ),
       ),
     );
@@ -332,7 +337,11 @@ class _VenueDetailScreenState extends State<VenueDetailScreen> {
                 const Divider(height: 32, indent: 20, endIndent: 20, color: AppColors.border),
                 Container(
                   key: _keys[4],
-                  child: _AutresSection(venue: venue, nearby: _nearby),
+                  child: _AutresSection(
+                    venue: venue,
+                    nearby: _nearby,
+                    onGoToBookings: widget.onGoToBookings,
+                  ),
                 ),
                 const SizedBox(height: 24),
               ],
@@ -600,13 +609,28 @@ class _EquipeSection extends StatelessWidget {
                   padding: const EdgeInsets.only(right: 24),
                   child: Column(
                     children: [
-                      CircleAvatar(
-                        radius: 32,
-                        backgroundColor: const Color(0xFFEDE9FE),
-                        backgroundImage: avatar.startsWith('http') ? NetworkImage(avatar) : null,
-                        child: avatar.startsWith('http')
-                            ? null
-                            : Text(initial, style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w700, color: AppColors.primary)),
+                      Container(
+                        width: 64,
+                        height: 64,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFEDE9FE),
+                          shape: BoxShape.circle,
+                        ),
+                        child: ClipOval(
+                          child: avatar.startsWith('http')
+                              ? Image.network(
+                                  avatar,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) => Center(
+                                    child: Text(initial,
+                                        style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w700, color: AppColors.primary)),
+                                  ),
+                                )
+                              : Center(
+                                  child: Text(initial,
+                                      style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w700, color: AppColors.primary)),
+                                ),
+                        ),
                       ),
                       const SizedBox(height: 8),
                       Text(name.split(' ').first, style: GoogleFonts.inter(fontSize: 13, color: AppColors.textGray)),
@@ -697,7 +721,12 @@ class _HorairesSection extends StatelessWidget {
 class _AutresSection extends StatelessWidget {
   final VenueItem venue;
   final List<VenueItem> nearby;
-  const _AutresSection({required this.venue, required this.nearby});
+  final VoidCallback? onGoToBookings;
+  const _AutresSection({
+    required this.venue,
+    required this.nearby,
+    this.onGoToBookings,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -760,7 +789,12 @@ class _AutresSection extends StatelessWidget {
                 return GestureDetector(
                   onTap: () => Navigator.pushReplacement(
                     context,
-                    MaterialPageRoute(builder: (_) => VenueDetailScreen(tenantId: v.id)),
+                    MaterialPageRoute(
+                      builder: (_) => VenueDetailScreen(
+                        tenantId: v.id,
+                        onGoToBookings: onGoToBookings,
+                      ),
+                    ),
                   ),
                   child: Container(
                     width: 160,

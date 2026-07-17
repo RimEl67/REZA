@@ -10,7 +10,11 @@ import '../widgets/geo_prompt_banner.dart';
 import 'venue_detail_screen.dart';
 
 class SearchResultsScreen extends StatefulWidget {
-  const SearchResultsScreen({super.key});
+  /// When provided, forwarded to VenueDetailScreen → BookingScreen →
+  /// BookingConfirmationScreen so "Voir mes réservations" switches to Mes RDV.
+  final VoidCallback? onGoToBookings;
+
+  const SearchResultsScreen({super.key, this.onGoToBookings});
 
   @override
   State<SearchResultsScreen> createState() => _SearchResultsScreenState();
@@ -184,7 +188,12 @@ class _SearchResultsScreenState extends State<SearchResultsScreen> {
   void _openVenue(VenueItem venue) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => VenueDetailScreen(tenantId: venue.id)),
+      MaterialPageRoute(
+        builder: (_) => VenueDetailScreen(
+          tenantId: venue.id,
+          onGoToBookings: widget.onGoToBookings,
+        ),
+      ),
     );
   }
 

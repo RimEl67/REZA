@@ -17,12 +17,15 @@ class BookingScreen extends StatefulWidget {
   final String tenantId;
   final VenueItem venue;
   final ServiceItem? preselectedService;
+  /// Forwarded to BookingConfirmationScreen to navigate to Mes RDV tab.
+  final VoidCallback? onGoToBookings;
 
   const BookingScreen({
     super.key,
     required this.tenantId,
     required this.venue,
     this.preselectedService,
+    this.onGoToBookings,
   });
 
   @override
@@ -352,6 +355,7 @@ class _BookingScreenState extends State<BookingScreen> {
             date: _formatFullDate(_selectedDate!),
             time: _selectedTime!,
             bookingResult: result,
+            onGoToBookings: widget.onGoToBookings,
           ),
         ),
       );

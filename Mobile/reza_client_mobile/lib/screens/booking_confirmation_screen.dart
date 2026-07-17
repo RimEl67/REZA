@@ -8,6 +8,10 @@ class BookingConfirmationScreen extends StatefulWidget {
   final String date;
   final String time;
   final Map<String, dynamic>? bookingResult;
+  /// Called when the user taps "Voir mes réservations".
+  /// If provided, pops all routes and invokes the callback so the
+  /// home screen can switch to the Mes RDV tab (index 2).
+  final VoidCallback? onGoToBookings;
 
   const BookingConfirmationScreen({
     super.key,
@@ -16,6 +20,7 @@ class BookingConfirmationScreen extends StatefulWidget {
     required this.date,
     required this.time,
     this.bookingResult,
+    this.onGoToBookings,
   });
 
   @override
@@ -213,6 +218,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                       child: ElevatedButton(
                         onPressed: () {
                           Navigator.popUntil(context, (route) => route.isFirst);
+                          widget.onGoToBookings?.call();
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.primary,

@@ -27,6 +27,7 @@ class _BookingsBody extends StatefulWidget {
 
 class _BookingsScreenState extends State<_BookingsBody> with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  final Map<String, bool> _expandedCards = {}; // Track expanded state per card
 
   BookingsViewModel get _bvm => context.watch<BookingsViewModel>();
   List<Map<String, dynamic>> get _upcoming => _bvm.upcoming;
@@ -138,6 +139,63 @@ class _BookingsScreenState extends State<_BookingsBody> with SingleTickerProvide
         titleSpacing: 20,
         title: Text('Mes réservations', style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w700, color: AppColors.textDark)),
         actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.sort_rounded, color: AppColors.textDark),
+            onSelected: (value) async {
+              // Use read instead of watch to avoid rebuild issues in callbacks
+              final bvm = context.read<BookingsViewModel>();
+              bvm.setSortBy(value);
+              await _load();
+            },
+            itemBuilder: (context) {
+              // Read sortBy once when building the menu
+              final currentSort = context.read<BookingsViewModel>().sortBy;
+              return [
+                PopupMenuItem(
+                  value: 'createdAt',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.access_time_rounded,
+                        size: 18,
+                        color: currentSort == 'createdAt' ? AppColors.primary : AppColors.textGray,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Date de réservation',
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          color: currentSort == 'createdAt' ? AppColors.primary : AppColors.textDark,
+                          fontWeight: currentSort == 'createdAt' ? FontWeight.w600 : FontWeight.w400,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'startTime',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.calendar_today_rounded,
+                        size: 18,
+                        color: currentSort == 'startTime' ? AppColors.primary : AppColors.textGray,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Date du rendez-vous',
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          color: currentSort == 'startTime' ? AppColors.primary : AppColors.textDark,
+                          fontWeight: currentSort == 'startTime' ? FontWeight.w600 : FontWeight.w400,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ];
+            },
+          ),
           IconButton(onPressed: _load, icon: const Icon(Icons.refresh_rounded, color: AppColors.textDark)),
         ],
         bottom: TabBar(
@@ -188,6 +246,11 @@ class _BookingsScreenState extends State<_BookingsBody> with SingleTickerProvide
       itemBuilder: (context, index) {
         final booking = bookings[index];
         final status = booking['status'] as String;
+        final bookingId = booking['id'] as String? ?? '';
+        final services = booking['services'] as List<dynamic>? ?? [];
+        final hasMultipleServices = services.length > 1;
+        final isExpanded = _expandedCards[bookingId] ?? false;
+        
         return Container(
           margin: const EdgeInsets.only(bottom: 14),
           decoration: BoxDecoration(
@@ -238,7 +301,116 @@ class _BookingsScreenState extends State<_BookingsBody> with SingleTickerProvide
                             ],
                           ),
                           const SizedBox(height: 4),
-                          Text(booking['service'] as String, style: GoogleFonts.inter(fontSize: 14, color: AppColors.textGray)),
+                          // Service display with accordion
+                          if (hasMultipleServices && services.isNotEmpty)
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // First service row - always visible with expand button
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        services[0]['name'] as String? ?? '',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 14,
+                                          color: AppColors.textGray,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Text(
+                                      '${services[0]['price'] ?? 0} MAD',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.textDark,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    // Expandable button
+                                    InkWell(
+                                      onTap: () {
+                                        setState(() {
+                                          _expandedCards[bookingId] = !isExpanded;
+                                        });
+                                      },
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              '+${services.length - 1}',
+                                              style: GoogleFonts.inter(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w600,
+                                                color: AppColors.primary,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 2),
+                                            AnimatedRotation(
+                                              turns: isExpanded ? 0.5 : 0,
+                                              duration: const Duration(milliseconds: 200),
+                                              child: const Icon(
+                                                Icons.keyboard_arrow_down_rounded,
+                                                size: 18,
+                                                color: AppColors.primary,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                // Animated expansion for additional services only
+                                AnimatedSize(
+                                  duration: const Duration(milliseconds: 250),
+                                  curve: Curves.easeInOut,
+                                  child: isExpanded
+                                      ? Column(
+                                          children: services.skip(1).map((service) {
+                                            final serviceName = service['name'] as String? ?? '';
+                                            final servicePrice = service['price'] as num? ?? 0;
+                                            return Padding(
+                                              padding: const EdgeInsets.only(top: 6),
+                                              child: Row(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Expanded(
+                                                    child: Text(
+                                                      serviceName,
+                                                      style: GoogleFonts.inter(
+                                                        fontSize: 14,
+                                                        color: AppColors.textGray,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 12),
+                                                  Text(
+                                                    '$servicePrice MAD',
+                                                    style: GoogleFonts.inter(
+                                                      fontSize: 13,
+                                                      fontWeight: FontWeight.w600,
+                                                      color: AppColors.textDark,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 12),
+                                                  // Empty space to match the expand button width
+                                                  const SizedBox(width: 46),
+                                                ],
+                                              ),
+                                            );
+                                          }).toList(),
+                                        )
+                                      : const SizedBox.shrink(),
+                                ),
+                              ],
+                            )
+                          else
+                            Text(booking['service'] as String, style: GoogleFonts.inter(fontSize: 14, color: AppColors.textGray)),
                           if (status == 'pending') ...[
                             const SizedBox(height: 4),
                             Text(
