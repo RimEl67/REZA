@@ -237,9 +237,7 @@ class AgendaViewModel extends ChangeNotifier {
     await updateStatus(app, 'completed');
   }
 
-  /// Ajouter à la caisse puis COMPLETED.
-  /// Returns message for toast; throws [ApiException] on hard fail.
-  /// If client/price missing → completes without sale (like web soft path).
+  /// Terminé avec caisse
   Future<String> completeWithCaisse(
     Appointment app, {
     required String paymentMethod,
@@ -252,24 +250,52 @@ class AgendaViewModel extends ChangeNotifier {
         _patchLocalStatus(app.id, 'completed');
         return 'Client manquant — rendez-vous terminé sans caisse';
       }
-      if (app.serviceId.isEmpty) {
+
+      // Build items from multi-service list, falling back to primary service.
+      final serviceLines = app.services.isNotEmpty
+          ? app.services
+          : (app.serviceId.isNotEmpty
+              ? [
+                  AppointmentServiceLine(
+                    serviceId: app.serviceId,
+                    name: app.service,
+                    duration: app.totalDuration > 0 ? app.totalDuration : app.duration,
+                    price: app.servicePrice ?? 0,
+                  )
+                ]
+              : <AppointmentServiceLine>[]);
+
+      if (serviceLines.isEmpty) {
         throw ApiException(
-            'Service manquant — impossible d’ajouter à la caisse');
+            'Service manquant — impossible d\'ajouter à la caisse');
       }
-      final price =
-          (app.servicePrice != null && app.servicePrice! > 0) ? app.servicePrice : null;
-      if (price == null) {
+
+      // Each service line needs a price; if any is missing, reject early.
+      final items = serviceLines
+          .where((s) => (s.serviceId?.isNotEmpty ?? false))
+          .map((s) => {
+                'serviceId': s.serviceId!,
+                'price': s.price > 0 ? s.price : null,
+                'quantity': 1,
+              })
+          .toList();
+
+      if (items.isEmpty) {
+        throw ApiException(
+            'Service manquant — impossible d\'ajouter à la caisse');
+      }
+
+      final missingPrice = items.any((i) => i['price'] == null);
+      if (missingPrice) {
         throw ApiException(
             'Prix du service manquant. Mettez à jour le catalogue ou encaissez depuis la Caisse.');
       }
 
       await invoiceService.createSale(
         clientId: app.clientId,
-        items: [
-          {'serviceId': app.serviceId, 'price': price, 'quantity': 1},
-        ],
+        items: items,
         paymentMethod: paymentMethod,
-        notes: app.service,
+        notes: serviceLines.map((s) => s.name).join(', '),
         appointmentId: app.id,
         tenantId: app.tenantId,
       );

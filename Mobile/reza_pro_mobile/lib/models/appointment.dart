@@ -1,3 +1,19 @@
+class AppointmentServiceLine {
+  final String? id;
+  final String? serviceId;
+  final String name;
+  final int duration;
+  final double price;
+
+  AppointmentServiceLine({
+    this.id,
+    this.serviceId,
+    required this.name,
+    required this.duration,
+    required this.price,
+  });
+}
+
 class Appointment {
   final String id;
   final String clientId;
@@ -5,6 +21,9 @@ class Appointment {
   final String serviceId;
   final String service;
   final double? servicePrice;
+  final List<AppointmentServiceLine> services;
+  final int totalDuration;
+  final double totalPrice;
   final String? employeeId;
   final String employee;
   final String time;
@@ -25,6 +44,9 @@ class Appointment {
     this.serviceId = '',
     required this.service,
     this.servicePrice,
+    this.services = const [],
+    this.totalDuration = 0,
+    this.totalPrice = 0,
     this.employeeId,
     required this.employee,
     required this.time,
@@ -45,6 +67,9 @@ class Appointment {
     String? serviceId,
     String? service,
     double? servicePrice,
+    List<AppointmentServiceLine>? services,
+    int? totalDuration,
+    double? totalPrice,
     String? employeeId,
     String? employee,
     String? time,
@@ -64,6 +89,9 @@ class Appointment {
       serviceId: serviceId ?? this.serviceId,
       service: service ?? this.service,
       servicePrice: servicePrice ?? this.servicePrice,
+      services: services ?? this.services,
+      totalDuration: totalDuration ?? this.totalDuration,
+      totalPrice: totalPrice ?? this.totalPrice,
       employeeId: employeeId ?? this.employeeId,
       employee: employee ?? this.employee,
       time: time ?? this.time,
@@ -159,14 +187,34 @@ class Appointment {
         : '—';
     final price = (service?['price'] as num?)?.toDouble() ??
         (service?['priceFrom'] as num?)?.toDouble();
+    final serviceLines = (json['services'] as List?)?.map((item) {
+      final map = item as Map<String, dynamic>;
+      return AppointmentServiceLine(
+        id: map['id']?.toString(),
+        serviceId: map['serviceId']?.toString(),
+        name: map['name']?.toString() ?? map['serviceName']?.toString() ?? 'Service',
+        duration: (map['duration'] as num?)?.toInt() ?? 0,
+        price: (map['price'] as num?)?.toDouble() ?? 0,
+      );
+    }).toList() ?? const <AppointmentServiceLine>[];
 
     return Appointment(
       id: json['id']?.toString() ?? '',
       clientId: client?['id']?.toString() ?? json['clientId']?.toString() ?? '',
       clientName: clientName.isEmpty ? 'Client' : clientName,
       serviceId: service?['id']?.toString() ?? json['serviceId']?.toString() ?? '',
-      service: service?['name']?.toString() ?? 'Service',
+      service: serviceLines.isNotEmpty
+          ? serviceLines.first.name
+          : service?['name']?.toString() ?? 'Service',
       servicePrice: price,
+      services: serviceLines,
+      totalDuration: (json['totalDuration'] as num?)?.toInt() ??
+          (json['duration'] as num?)?.toInt() ??
+          (service?['duration'] as num?)?.toInt() ??
+          60,
+      totalPrice: (json['totalPrice'] as num?)?.toDouble() ??
+          (service?['price'] as num?)?.toDouble() ??
+          0,
       employeeId: employee?['id']?.toString() ?? json['employeeId']?.toString(),
       employee: employeeName.isEmpty ? '—' : employeeName,
       time: time,
