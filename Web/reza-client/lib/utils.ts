@@ -354,30 +354,17 @@ export function getImageUrl(imagePath: string | null | undefined): string {
 export function isTenantComplete(tenant: any): boolean {
   if (!tenant) return false;
 
-  // Check all required fields
-  const hasCategory = tenant.category && tenant.category.trim().length > 0;
-  const hasShortDescription = tenant.shortDescription && tenant.shortDescription.trim().length > 0;
-  const hasCoverImage = tenant.coverImage && tenant.coverImage.trim().length > 0;
-  const hasPhone = tenant.phone && tenant.phone.trim().length > 0;
-  const hasEmail = tenant.email && tenant.email.trim().length > 0;
-  const hasCity = tenant.city && tenant.city.trim().length > 0;
+  // Only require a name to be displayed in search results
+  // All other fields are optional and will be shown if available
+  const hasName = (tenant.name || tenant.establishmentName || '').trim().length > 0;
 
-  // Debug: log missing fields for first tenant
   if (process.env.NODE_ENV === 'development') {
-    const missingFields = [];
-    if (!hasCategory) missingFields.push('category');
-    if (!hasShortDescription) missingFields.push('shortDescription');
-    if (!hasCoverImage) missingFields.push('coverImage');
-    if (!hasPhone) missingFields.push('phone');
-    if (!hasEmail) missingFields.push('email');
-    if (!hasCity) missingFields.push('city');
-    if (missingFields.length > 0) {
-      console.log(`Tenant ${tenant.name || tenant.id} missing fields:`, missingFields);
+    if (!hasName) {
+      console.log(`Tenant ${tenant.id} has no name, skipping`);
     }
   }
 
-  // All required fields must be present
-  return hasCategory && hasShortDescription && hasCoverImage && hasPhone && hasEmail && hasCity;
+  return hasName;
 }
 
 /**

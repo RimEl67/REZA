@@ -88,7 +88,7 @@ const BeautyAppointmentGrid = () => {
   const stats = role === 'client' ? statsClient : statsPro;
 
   return (
-    <div className="min-h-screen bg-[#f5f7f3] p-8 md:p-16 -mt-0 lg:-mt-16 pb-28 lg:pb-0">
+    <div className="min-h-screen bg-white p-8 md:p-16 -mt-0 lg:-mt-16 pb-28 lg:pb-0">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-12">
@@ -99,7 +99,7 @@ const BeautyAppointmentGrid = () => {
             Vous êtes un client ou professionnel de la beauté !<br />
             <span className="inline-block">Pourquoi choisir REZA ?</span>
             <span className="inline-block">
-              <div className="relative flex items-center border-black/10 border justify-center w-[260px] h-12 bg-[#f5f7f3] rounded-full ml-2">
+              <div className="relative flex items-center border-black/10 border justify-center w-[260px] h-12 bg-white rounded-full ml-2">
                 <motion.div
                   layout
                   transition={{ type: 'spring', stiffness: 500, damping: 30 }}
@@ -152,7 +152,7 @@ const BeautyAppointmentGrid = () => {
                 className={`
                   relative p-12 flex flex-col justify-center items-center text-center
                   transition-all duration-500 ease-out
-                  bg-[#f5f7f3]
+                  bg-white
                   ${index % 3 !== 2 ? 'border-r border-gray-200' : ''}
                   ${index < 3 ? 'border-b border-gray-200' : ''}
                   cursor-pointer

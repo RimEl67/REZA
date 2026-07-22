@@ -627,36 +627,44 @@ function LuxurySearchResultsContent() {
 			markersLayerRef.current.clearLayers();
 			markersRef.current = [];
 
-			const defaultCenter = { lat: 33.5731, lng: -7.6298 };
 			const bounds: [number, number][] = [];
 
-			filteredResults.forEach((salon) => {
-				const coords =
-					salon.coordinates?.lat && salon.coordinates?.lng
-						? salon.coordinates
-						: defaultCenter;
-				const latLng: [number, number] = [coords.lat, coords.lng];
+			// Only place markers for salons that have real GPS coordinates
+			const salonsWithCoords = filteredResults.filter(
+				(salon) => salon.coordinates?.lat && salon.coordinates?.lng
+			);
+
+			salonsWithCoords.forEach((salon) => {
+				const latLng: [number, number] = [salon.coordinates.lat, salon.coordinates.lng];
 				bounds.push(latLng);
 
-				const marker = L.circleMarker(latLng, {
-					radius: 10,
-					color: '#ffffff',
-					weight: 3,
-					fillColor: '#8b7260',
-					fillOpacity: 1,
+				// Build price label for the marker (Fresha-style pill)
+				const priceLabel = salon.priceRange?.min != null
+					? `${Math.round(salon.priceRange.min)} MAD`
+					: salon.price || null;
+
+				const isSelected = selectedSalon === salon.id;
+				const markerHtml = priceLabel
+					? `<div class="reza-map-marker${isSelected ? ' reza-map-marker--selected' : ''}">
+						<span class="reza-map-price">${priceLabel}</span>
+					</div>`
+					: `<div class="reza-map-marker${isSelected ? ' reza-map-marker--selected' : ''}">
+						<span class="reza-map-dot"></span>
+					</div>`;
+
+				const icon = L.divIcon({
+					className: '',
+					html: markerHtml,
+					iconAnchor: [32, 16],
 				});
+
+				const marker = L.marker(latLng, { icon });
 
 				marker.on('mouseover', () => setSelectedSalon(salon.id));
 				marker.on('mouseout', () => setSelectedSalon(null));
 				marker.on('click', () => {
 					setSelectedSalon(salon.id);
 					router.push(getSalonHref(salon));
-				});
-
-				marker.bindTooltip(salon.name || 'Salon', {
-					direction: 'top',
-					offset: [0, -8],
-					opacity: 0.95,
 				});
 
 				marker.addTo(markersLayerRef.current);
@@ -667,14 +675,14 @@ function LuxurySearchResultsContent() {
 			if (!hasFitBoundsOnceRef.current) {
 				if (bounds.length > 0) {
 					try {
-						leafletMapRef.current.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+						leafletMapRef.current.fitBounds(bounds, { padding: [60, 60], maxZoom: 14 });
 						hasFitBoundsOnceRef.current = true;
 					} catch {
 						/* ignore */
 					}
 				} else {
 					try {
-						leafletMapRef.current.setView([defaultCenter.lat, defaultCenter.lng], 13);
+						leafletMapRef.current.setView([33.5731, -7.6298], 13);
 						hasFitBoundsOnceRef.current = true;
 					} catch {
 						/* ignore */
@@ -694,27 +702,9 @@ function LuxurySearchResultsContent() {
 		return () => {
 			cancelled = true;
 		};
-	}, [filteredResults, loading, mapReady]);
+	}, [filteredResults, loading, mapReady, selectedSalon]);
 
-	// Card↔marker sync: style only — no pan/zoom (preserve user camera)
-	useEffect(() => {
-		if (!mapReady || !markersRef.current.length) return;
-
-		markersRef.current.forEach((m) => {
-			if (!m.marker) return;
-			const selected = m.id === selectedSalon;
-			m.marker.setStyle({
-				radius: selected ? 16 : 10,
-				color: '#ffffff',
-				weight: selected ? 5 : 2,
-				fillColor: '#8b7260',
-				fillOpacity: selected ? 1 : 0.7,
-			});
-			if (selected) {
-				m.marker.bringToFront();
-			}
-		});
-	}, [selectedSalon, mapReady]);
+	// Note: marker selected state is handled in the main markers effect (via reza-map-marker--selected class)
 
 	const toggleLike = async (salon: any) => {
 		if (!isAuthenticated || !user?.email) {
@@ -830,6 +820,45 @@ function LuxurySearchResultsContent() {
 				}
 			`}</style>
 
+			<style>{`
+				/* Custom Fresha-style map markers */
+				.reza-map-marker {
+					display: inline-flex;
+					align-items: center;
+					justify-content: center;
+					background: #111827;
+					color: white;
+					border-radius: 20px;
+					padding: 4px 10px;
+					font-size: 11px;
+					font-weight: 700;
+					white-space: nowrap;
+					box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+					border: 2px solid white;
+					cursor: pointer;
+					transition: all 0.15s ease;
+					min-width: 28px;
+					min-height: 28px;
+				}
+				.reza-map-marker:hover,
+				.reza-map-marker--selected {
+					background: #4a3728;
+					transform: scale(1.15);
+					z-index: 999 !important;
+					box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+				}
+				.reza-map-dot {
+					display: block;
+					width: 8px;
+					height: 8px;
+					background: white;
+					border-radius: 50%;
+				}
+				.reza-map-price {
+					letter-spacing: 0.02em;
+				}
+			`}</style>
+
 			{/* Header - Fixed */}
 			<RezaNavbar />
 
@@ -844,7 +873,7 @@ function LuxurySearchResultsContent() {
 								<div className="flex-shrink-0">
 									{/* Number on its own line, label below */}
 									<h1 className="text-3xl sm:text-4xl font-light text-gray-900 leading-none">{loading ? '...' : filteredResults.length}</h1>
-									<span className="block text-base sm:text-lg mt-1" style={{ color: '#8b7260' }}>Salons</span>
+									<span className="block text-base sm:text-lg mt-1" style={{ color: '#111827' }}>Salons</span>
 									<p className="text-xs sm:text-sm text-gray-400 mt-2">
 										{location?.trim()
 											? location
@@ -880,7 +909,7 @@ function LuxurySearchResultsContent() {
 												onClick={() => void requestUserLocation()}
 												disabled={geoLoading}
 												className={`p-1 rounded-full hover:bg-gray-100 disabled:opacity-50 flex-shrink-0 ${
-													userLocation ? 'text-emerald-600' : 'text-[#8b7260]'
+													userLocation ? 'text-emerald-600' : 'text-[#111827]'
 												}`}
 												title="Utiliser ma position"
 												aria-label="Utiliser ma position"
@@ -911,7 +940,7 @@ function LuxurySearchResultsContent() {
 												}}
 												className={`px-5 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all border relative z-[100] shadow-sm flex-shrink-0 ${
 													sortBy === opt.key
-														? 'bg-[#8b7260] text-white border-[#8b7260]'
+														? 'bg-[#111827] text-white border-[#111827]'
 														: 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
 												}`}
 											>
@@ -926,11 +955,11 @@ function LuxurySearchResultsContent() {
 						{/* Soft location prompt — once; hide silently after deny / Plus tard */}
 						{showGeoPrompt === true && !userLocation && (
 							<div
-								className="mb-6 flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-[#8b7260]/30 bg-white px-4 py-3 shadow-sm"
+								className="mb-6 flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-[#111827]/30 bg-white px-4 py-3 shadow-sm"
 							>
 								<div className="flex items-start gap-3 flex-1 min-w-0">
-									<div className="mt-0.5 rounded-full p-2 flex-shrink-0 bg-[#8b7260]/10">
-										<MapPin className="w-4 h-4 text-[#8b7260]" />
+									<div className="mt-0.5 rounded-full p-2 flex-shrink-0 bg-[#111827]/10">
+										<MapPin className="w-4 h-4 text-[#111827]" />
 									</div>
 									<div className="min-w-0">
 										<p className="text-sm font-medium text-gray-900">
@@ -953,7 +982,7 @@ function LuxurySearchResultsContent() {
 										type="button"
 										onClick={() => void requestUserLocation()}
 										disabled={geoLoading}
-										className="px-4 py-2 rounded-full bg-[#8b7260] text-white text-xs font-medium hover:opacity-90 disabled:opacity-50 whitespace-nowrap"
+										className="px-4 py-2 rounded-full bg-[#111827] text-white text-xs font-medium hover:opacity-90 disabled:opacity-50 whitespace-nowrap"
 									>
 										{geoLoading ? 'Localisation…' : 'Utiliser ma position'}
 									</button>
@@ -964,7 +993,7 @@ function LuxurySearchResultsContent() {
 						{/* Results */}
 						{loading ? (
 							<div className="flex items-center justify-center py-20">
-								<div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#8b7260]"></div>
+								<div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#111827]"></div>
 							</div>
 						) : filteredResults.length === 0 ? (
 							<div className="text-center py-20">
@@ -983,7 +1012,7 @@ function LuxurySearchResultsContent() {
 								>
 									<div className={`flex flex-col sm:flex-row gap-4 sm:gap-6 p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-white border-2 transition-colors duration-200 relative z-[50] ${
 										selectedSalon === salon.id 
-											? 'border-[#8b7260]' 
+											? 'border-[#111827]' 
 											: 'border-transparent hover:border-gray-200'
 									}`}>
 										{/* Image */}
@@ -1013,13 +1042,13 @@ function LuxurySearchResultsContent() {
 										{/* Content */}
 										<div className="flex-1 flex flex-col justify-between py-1">
 											<div>
-												<h3 className="text-xl sm:text-2xl font-medium text-gray-900 mb-2 sm:mb-3 group-hover:text-[#8b7260] transition-colors">
+												<h3 className="text-xl sm:text-2xl font-medium text-gray-900 mb-2 sm:mb-3 group-hover:text-[#111827] transition-colors">
 													{salon.name}
 												</h3>
 												
 												<div className="flex flex-wrap items-center gap-3 sm:gap-4 mb-3 sm:mb-4">
 													<div className="flex items-center gap-1.5">
-														<Star className="w-4 h-4 fill-[#8b7260] text-[#8b7260]" />
+														<Star className="w-4 h-4 fill-[#111827] text-[#111827]" />
 														<span className="text-xs sm:text-sm font-semibold text-gray-900">{(salon.rating || 0).toFixed(1)}</span>
 														<span className="text-xs sm:text-sm text-gray-400">({salon.reviews || 0})</span>
 													</div>
@@ -1061,7 +1090,7 @@ function LuxurySearchResultsContent() {
 													const todayHours = getTodayHours(salon);
 													return todayHours ? (
 														<div className="flex items-center gap-2 text-xs sm:text-sm text-gray-600 mb-3 sm:mb-4">
-															<Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#8b7260]" />
+															<Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#111827]" />
 															<span className="font-medium">
 																{todayHours === 'Fermé' ? (
 																	<span className="text-red-500">{todayHours}</span>
@@ -1095,7 +1124,7 @@ function LuxurySearchResultsContent() {
 													</div>
 												)}
 												<button
-													className="w-full sm:w-auto px-6 py-2.5 rounded-full bg-[#8b7260] text-white text-xs sm:text-sm font-medium hover:bg-[#6d5a4d] transition-all flex items-center justify-center gap-2 group/btn relative z-[100] shadow-sm"
+													className="w-full sm:w-auto px-6 py-2.5 rounded-full bg-[#111827] text-white text-xs sm:text-sm font-medium hover:bg-[#1f2937] transition-all flex items-center justify-center gap-2 group/btn relative z-[100] shadow-sm"
 													onClick={(e) => {
 														e.stopPropagation(); // Prevent card onClick from firing
 														router.push(getSalonHref(salon));
@@ -1122,18 +1151,30 @@ function LuxurySearchResultsContent() {
 							: 'hidden'
 					} lg:block lg:w-[45%] lg:flex-shrink-0 lg:sticky lg:top-20 lg:h-[calc(100vh-5rem)] lg:self-start lg:z-[1] bg-[#e8ebe6]`}
 				>
+				<div className="relative w-full h-full">
 					<div
 						id="map"
 						ref={mapRef}
 						className="w-full h-full min-h-[calc(100vh-5rem)] lg:min-h-0"
 						style={{ zIndex: 1 }}
 					/>
+					{/* Overlay when results exist but none have GPS coordinates */}
+					{!loading && filteredResults.length > 0 && filteredResults.every(s => !s.coordinates?.lat) && (
+						<div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: 10 }}>
+							<div className="bg-white/90 backdrop-blur-sm rounded-2xl px-6 py-4 text-center shadow-lg border border-gray-200 mx-4">
+								<MapPin className="w-8 h-8 text-[#111827] mx-auto mb-2" />
+								<p className="text-sm font-medium text-gray-800">Aucune adresse GPS disponible</p>
+								<p className="text-xs text-gray-500 mt-1">Les salons n&apos;ont pas encore ajouté leur localisation</p>
+							</div>
+						</div>
+					)}
 				</div>
+			</div>
 
 				{/* Mobile Map Toggle */}
 				<button
 					onClick={() => setShowMobileMap(!showMobileMap)}
-					className="lg:hidden fixed bottom-8 right-6 z-50 px-6 py-4 rounded-full bg-[#8b7260] text-white shadow-2xl flex items-center gap-3 font-medium hover:bg-[#6d5a4d] transition-all"
+					className="lg:hidden fixed bottom-8 right-6 z-50 px-6 py-4 rounded-full bg-[#111827] text-white shadow-2xl flex items-center gap-3 font-medium hover:bg-[#1f2937] transition-all"
 				>
 					{showMobileMap ? (
 						<>

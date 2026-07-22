@@ -1082,7 +1082,7 @@ export default function AccountDashboard() {
       {showLogoutLoading ? (
         <Loading text="Déconnexion..." />
       ) : (
-        <div className="min-h-screen bg-[#f5f7f3] pt-20">
+        <div className="min-h-screen bg-white pt-20">
           <style jsx>{`
             @keyframes fadeIn {
               from { opacity: 0; transform: translateY(10px); }
@@ -1180,136 +1180,114 @@ export default function AccountDashboard() {
             }
           `}</style>
 
-          {/* Minimalist Header */}
-          <div className="border-b border-gray-100">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                  <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extralight tracking-tight text-gray-900 mb-2">
-                    Bonjour, <span className="gradient-text font-light">{userData.firstName}</span>
-                  </h1>
-                  <p className="text-xs sm:text-sm text-gray-400 tracking-wide">Gérez votre expérience bien-être</p>
-                </div>
-                <div className="flex items-center gap-2 sm:gap-4">
-                  <button
-                    className="group relative px-4 sm:px-6 py-2 sm:py-2.5 bg-gray-900 text-white text-xs sm:text-sm tracking-wide overflow-hidden rounded-full"
-                    onClick={() => router.push('/search-results')}
-                  >
-                    <span className="relative z-10 flex items-center gap-2">
-                      <Plus className="w-3 h-3 sm:w-4 sm:h-4" />
-                      <span className="hidden sm:inline">Réserver</span>
-                    </span>
-                    <div className="absolute inset-0 bg-[#8b7260] transform translate-y-full group-hover:translate-y-0 transition-transform duration-300 rounded-full"></div>
-                  </button>
-                  {/* Profile picture - match SettingsTab style */}
-                  <div
-                    className="w-11 h-11 rounded-full border-2 border-gray-200 bg-gray-900 flex items-center justify-center overflow-hidden"
-                    style={{
-                      boxShadow: '0 2px 8px 0 rgba(31,38,135,0.06)',
-                      objectFit: 'cover',
-                    }}
-                  >
+
+          {/* ========================== COMPACT PROFILE HEADER ========================== */}
+          <div className="bg-white border-b border-gray-100 shadow-sm">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+
+              {/* Top row: avatar + name + actions */}
+              <div className="flex items-center gap-3 py-3">
+
+                {/* Avatar — teal circle with initials */}
+                <div className="relative flex-shrink-0">
+                  <div className="w-9 h-9 rounded-full bg-[#111827] flex items-center justify-center overflow-hidden shadow-sm">
                     {userData.avatar ? (
                       <img
-                        key={userData.avatar.substring(0, 100) || ''} // Force re-render when avatar changes
                         src={userData.avatar}
                         alt="Profil"
                         className="w-full h-full object-cover"
-                        onError={(e) => {
-                          // Silently handle avatar loading errors - fallback to initials
-                          console.warn('[Account] Avatar failed to load, using initials');
-                          setUserData(prev => ({ ...prev, avatar: null }));
-                        }}
-                        loading="lazy"
+                        onError={() => setUserData(prev => ({ ...prev, avatar: null }))}
                       />
                     ) : (
-                      <span className="text-sm font-semibold text-white font-thin select-none">
-                        {userData.firstName?.[0] || userData.email?.[0]?.toUpperCase() || 'U'}
-                        {userData.lastName?.[0] || ''}
+                      <span className="text-xs font-bold text-white select-none tracking-wide">
+                        {userData.firstName?.[0]?.toUpperCase() || userData.email?.[0]?.toUpperCase() || 'U'}
+                        {userData.lastName?.[0]?.toUpperCase() || ''}
                       </span>
                     )}
                   </div>
+                  <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-400 border-2 border-white rounded-full" />
+                </div>
+
+                {/* Name & email */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate leading-tight">
+                    {[userData.firstName, userData.lastName].filter(Boolean).join(' ') || userData.email?.split('@')[0] || ''}
+                  </p>
+                  <p className="text-xs text-gray-400 truncate">{userData.email}</p>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {/* Réserver — premium pill */}
+                  <button
+                    onClick={() => router.push('/search-results')}
+                    className="group relative flex items-center gap-2 px-4 py-2 rounded-full text-white text-xs font-semibold transition-all duration-200 overflow-hidden shadow-md hover:shadow-[#111827]/40 hover:-translate-y-0.5 active:translate-y-0"
+                    style={{ background: 'linear-gradient(135deg, #111827 0%, #1f2937 100%)' }}
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Réserver</span>
+                    {/* shine effect */}
+                    <span className="absolute inset-0 opacity-0 group-hover:opacity-10 bg-white transition-opacity duration-200 rounded-full" />
+                  </button>
+
                   {/* Logout icon */}
                   <button
-                    className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-gray-100 transition"
-                    title="Déconnexion"
                     onClick={() => {
                       setShowLogoutLoading(true);
-                      // Clear all local state before logout
-                      setUserData({
-                        firstName: '',
-                        lastName: '',
-                        email: '',
-                        phone: '',
-                        address: '',
-                        joinDate: '',
-                        totalBookings: 0,
-                        avatar: null
-                      });
-                      setAppointments([]);
-                      setClientData(null);
-                      setFamilyMembers([]);
-                      setReviews([]);
-                      setFavoritesCount(0);
-                      // Call logout from context
+                      setUserData({ firstName: '', lastName: '', email: '', phone: '', address: '', joinDate: '', totalBookings: 0, avatar: null });
+                      setAppointments([]); setClientData(null); setFamilyMembers([]); setReviews([]); setFavoritesCount(0);
                       logoutFromContext();
                       setTimeout(() => router.push('/login'), 500);
                     }}
+                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-all duration-200"
+                    title="Déconnexion"
                   >
-                    <LogOut className="w-5 h-5 text-gray-400" />
+                    <LogOut className="w-4 h-4" />
                   </button>
                 </div>
               </div>
-            </div>
-          </div>
 
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-12">
-            {/* Horizontal Navigation */}
-            <nav className="flex items-center gap-1 mb-8 sm:mb-12 lg:mb-16 border-b border-gray-100 overflow-x-auto scrollbar-hide pb-2 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8">
-              {[
-                { id: 'overview', label: 'Vue d\'ensemble', icon: DashboardIcon },
-                { id: 'appointments', label: 'Rendez-vous', icon: CalendarIcon },
-                { id: 'family', label: 'Proches', icon: ProchesIcon },
-                { id: 'avis', label: 'Mes Avis', icon: ArrowAutofitLeftIcon },
-                { id: 'rewards', label: 'Mes récompenses', icon: GiftTablerIcon, disabled: true, soon: true }, // soon flag
-                { id: 'profile', label: 'Profil', icon: User }
-              ].map(({ id, label, icon: Icon, disabled, soon }) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => {
-                    if (!disabled) setActiveTab(id);
-                  }}
-                  disabled={disabled}
-                  className={`relative px-3 sm:px-4 lg:px-6 py-3 sm:py-4 text-xs sm:text-sm tracking-wide transition-all whitespace-nowrap flex-shrink-0
-                    ${activeTab === id ? 'text-gray-900' : ''}
-                    ${disabled ? 'text-gray-300 cursor-not-allowed' : activeTab !== id ? 'text-gray-400 hover:text-gray-600' : ''}
-                  `}
-                  tabIndex={disabled ? -1 : 0}
-                  aria-disabled={disabled ? 'true' : undefined}
-                >
-                  <div className="flex items-center gap-1.5 sm:gap-2">
-                    <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              {/* Tab nav — underline style */}
+              <div className="flex items-center gap-0 overflow-x-auto scrollbar-hide">
+                {[
+                  { id: 'overview', label: "Vue d'ensemble", icon: DashboardIcon },
+                  { id: 'appointments', label: 'Rendez-vous', icon: CalendarIcon },
+                  { id: 'family', label: 'Proches', icon: ProchesIcon },
+                  { id: 'avis', label: 'Mes Avis', icon: ArrowAutofitLeftIcon },
+                  { id: 'rewards', label: 'Récompenses', icon: GiftTablerIcon, disabled: true, soon: true },
+                  { id: 'profile', label: 'Profil', icon: User }
+                ].map(({ id, label, icon: Icon, disabled, soon }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => { if (!disabled) setActiveTab(id); }}
+                    disabled={disabled}
+                    className={`relative flex items-center gap-1.5 px-3.5 py-3 text-xs font-medium whitespace-nowrap flex-shrink-0 transition-all duration-200 border-b-2
+                      ${ activeTab === id
+                          ? 'border-[#111827] text-[#111827]'
+                          : disabled
+                          ? 'border-transparent text-gray-300 cursor-not-allowed'
+                          : 'border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-200'
+                      }`}
+                    tabIndex={disabled ? -1 : 0}
+                  >
+                    <Icon className="w-3.5 h-3.5 flex-shrink-0" />
                     <span className="relative">
                       {label}
                       {soon && (
-                        <span
-                          className="absolute -top-1 -right-5 bg-[#8b7260] text-white text-[10px] px-2 py-0.5 rounded-full font-semibold"
-                          style={{
-                            transform: 'rotate(18deg)',
-                          }}
-                        >
-                          Bientôt
-                        </span>
+                        <span className="absolute -top-2 -right-6 bg-[#111827] text-white text-[9px] px-1.5 py-0.5 rounded-full font-bold tracking-wide" style={{ transform: 'rotate(10deg)' }}>Soon</span>
                       )}
                     </span>
-                  </div>
-                  {activeTab === id && !disabled && (
-                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gray-900"></div>
-                  )}
-                </button>
-              ))}
-            </nav>
+                  </button>
+                ))}
+              </div>
+
+            </div>
+          </div>
+          {/* White content area */}
+          <div className="bg-white">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
 
             {/* Tab Content */}
             {activeTab === 'overview' && (
@@ -1434,7 +1412,7 @@ export default function AccountDashboard() {
               />
             )}
           </div>
-
+          </div>
           {/* Add Person Modal */}
           {showAddPersonModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">

@@ -195,7 +195,7 @@ export class DiscoveryService {
 
     const where: any = {
       isActive: true,
-      subscriptionActive: true,
+      // subscriptionActive filter removed — show all active tenants regardless of subscription
     };
 
     if (search) {

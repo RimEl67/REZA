@@ -915,40 +915,17 @@ function LoginPageContent() {
             <div className="w-full h-full rounded-3xl overflow-hidden bg-black flex flex-col items-center justify-center relative">
               {/* Background Image */}
               <img 
-                src="/log.png" 
+                src="/login_bg.png" 
                 alt="Fond de connexion" 
                 className="absolute inset-0 w-full h-full object-cover rounded-3xl z-0" 
               />
               
-              {/* Animated Gradient Overlay 
-              <div className="absolute inset-0 bg-gradient-to-br from-[#002366]/90 via-[#003d99]/80 to-[#0052cc]/70 z-[1]"></div>
-              */}
-              {/* Floating Shapes */}
-              <div className="absolute inset-0 overflow-hidden z-[2]">
-                <div className="absolute top-20 left-10 w-32 h-32 bg-white/5 rounded-full blur-3xl animate-float"></div>
-                <div className="absolute bottom-20 right-10 w-40 h-40 bg-blue-300/10 rounded-full blur-3xl animate-float-delayed"></div>
-                <div className="absolute top-1/2 left-1/4 w-24 h-24 bg-white/5 rounded-full blur-2xl animate-float-slow"></div>
-                <span className="absolute top-10 left-18 -translate-x-1/2 ext-2xl lg:text-5xl text-white select-none pointer-events-none" style={{zIndex:3}}>*</span>
-              </div>
+              {/* Soft dark overlay for text readability */}
+              <div className="absolute inset-0 bg-gradient-to-br from-black/70 via-black/40 to-black/60 z-[1]"></div>
+
               
-              <div className="relative h-full flex flex-col items-start justify-center p-0 lg:p-0 z-10">
-                <div className="space-y-8 max-w-lg text-left">
-                  <div className="mb-0 flex flex-col gap-4 -mt-74">
-                    <div>
-                      {/* Removed star from here */}
-                      <h3 className="text-2xl lg:text-5xl text-white font-medium leading-tight text-left">
-                        <span className="inline-block align-middle ml-2">
-                          <img src="/logos/logo-2.svg?v=rz1" alt="Reza Logo" className="h-6 lg:h-7 w-auto" />
-                        </span>
-                      </h3>
-                    </div>
-                    {/* Dynamic Animated Text - now separated from REZA text */}
-                    <div className="-mt-0 pl-0">
-                      <AnimatedText className="text-white w-[380px] lg:w-[620px] min-w-[520px] max-w-full pl-0 lg:pl-2" />
-                    </div>
-                  </div>
-                </div>
-              </div>
+
+
             </div>
           </div>
         </div>

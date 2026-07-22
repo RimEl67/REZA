@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, MapPin, Scissors, HandMetal, Sparkles, Paintbrush, User, ArrowRight, X } from 'lucide-react';
+import { Search, MapPin, Scissors, HandMetal, Sparkles, Paintbrush, User, ArrowRight, X, QrCode } from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import api from '../lib/api';
@@ -23,9 +23,38 @@ const ManucureIcon = () => (
   <img src="/icons/nail-polish.png" alt="Manucure" width={24} height={24} style={{ display: 'inline-block' }} />
 );
 
+const DigitRoll = ({ val }: { val: string }) => {
+  if (val === ' ') return <span className="w-1 inline-block" />;
+  const num = parseInt(val, 10);
+  if (isNaN(num)) return <span>{val}</span>;
+  return (
+    <span className="inline-flex flex-col h-6 overflow-hidden relative w-[11px] sm:w-[13px] font-bold text-gray-950 text-lg sm:text-xl leading-none">
+      <span 
+        className="transition-transform duration-700 ease-out flex flex-col"
+        style={{ transform: `translateY(-${num * 24}px)` }}
+      >
+        {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
+          <span key={n} className="h-6 flex items-center justify-center">
+            {n}
+          </span>
+        ))}
+      </span>
+    </span>
+  );
+};
+
 export default function HeroAbout() {
   const [searchQuery, setSearchQuery] = useState('');
   const [location, setLocation] = useState('');
+  const [count, setCount] = useState(20178);
+  
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCount(prev => prev + Math.floor(Math.random() * 2) + 1);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
   const [locationSearchFilter, setLocationSearchFilter] = useState('');
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const [showLocationDropdown, setShowLocationDropdown] = useState(false);
@@ -284,54 +313,46 @@ export default function HeroAbout() {
   return (
     <section
       id="about"
-      className="relative w-full min-h-screen flex items-center justify-center overflow-hidden"
+      className="relative w-full min-h-screen flex items-center justify-center overflow-hidden bg-white"
     >
-      {/* Background Image with Overlay */}
-      <div className="absolute inset-0 w-full h-full">
-        <Image
-          src="/hero2.jpg"
-          alt="Hero Background"
-          fill
-          priority
-          className="object-cover object-center"
-        />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-black/60 to-black/20" />
+      {/* Fresha-style White Background with Animated Soft Gradient Aura */}
+      <div className="absolute inset-0 w-full h-full bg-[#fdfdfd] overflow-hidden pointer-events-none">
+        {/* Deep purple/lavender glow on the left */}
+        <div className="absolute top-[5%] -left-[10%] w-[70vw] h-[70vw] md:w-[50vw] md:h-[50vw] bg-[#e1d5ff] rounded-full mix-blend-multiply filter blur-[100px] md:blur-[140px] opacity-80 animate-float-slow" />
+        {/* Soft pink glow extending towards the center */}
+        <div className="absolute -top-[10%] left-[15%] w-[70vw] h-[70vw] md:w-[50vw] md:h-[50vw] bg-[#ffebf9] rounded-full mix-blend-multiply filter blur-[100px] md:blur-[140px] opacity-70 animate-float-medium" />
       </div>
-
-      {/* Decorative Elements */}
-      <div className="absolute top-20 left-10 w-32 h-32 bg-white/5 rounded-full blur-3xl" />
-      <div className="absolute bottom-20 right-10 w-40 h-40 bg-white/5 rounded-full blur-3xl" />
 
       {/* Main Content */}
       <div className="relative z-10 w-full max-w-6xl mx-auto px-6 md:px-12 py-20">
         {/* Header Content */}
-        <div className="text-center mb-12 space-y-6">
-         
-          
-          <h1 className="text-5xl md:text-7xl font-thin text-[#f5f7f3] mb-6 tracking-tight mt-28">
-           Votre beauté, notre passion
+        <div className="text-center mb-10 space-y-4">
+          <h1 className="text-[2.75rem] md:text-6xl font-bold text-[#111111] mb-4 mt-16 animate-slide-up-1 tracking-tight">
+            Réservez vos soins
           </h1>
-           <p className="text-xl md:text-2xl text-white/90 font-light max-w-2xl mx-auto">
-            Découvrez les meilleurs salons près de chez vous et prenez rendez-vous en ligne en quelques secondes.
+          <p className="text-base md:text-[1.125rem] text-gray-800 font-normal max-w-3xl mx-auto animate-slide-up-2">
+            Les meilleurs experts beauté et bien-être, recommandés par des millions de personnes dans le monde.
           </p>
-         
         </div>
 
         {/* Search Card */}
-        <div className="max-w-full md:max-w-4xl mx-auto px-2 md:px-0">
-          <div className="bg-[#f5f7f3] rounded-lg md:rounded-full shadow-2xl p-4 md:p-3 backdrop-blur-xl w-full">
-            <div className="flex flex-col md:flex-row gap-3">
+        <div className="max-w-full md:max-w-[1000px] mx-auto px-4 md:px-0 animate-slide-up-3 relative mt-10">
+          {/* Intense horizontal pink aura directly behind search bar */}
+          <div className="absolute inset-0 bg-gradient-to-r from-[#e3c7ff] via-[#ffc2f6] to-[#e3c7ff] rounded-full blur-[24px] md:blur-[32px] opacity-70 z-0 scale-y-110 scale-x-[1.02]"></div>
+          
+          <div className="bg-white rounded-full shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-gray-100 p-2 w-full relative z-20">
+            <div className="flex flex-col md:flex-row items-center w-full">
               {/* Search Input */}
               <div className="flex-1 relative w-full mb-2 md:mb-0">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 z-10" />
+                <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 z-10" />
                 <input
                   type="text"
-                  placeholder="Nom du salon, prestations (coupe...)"
+                  placeholder="Toutes les prestations"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onFocus={() => setShowSearchDropdown(true)}
                   onBlur={() => setTimeout(() => setShowSearchDropdown(false), 200)}
-                  className="w-full pl-12 pr-4 py-3 rounded-full focus:border-black focus:outline-none focus:ring-2 focus:ring-black/5 transition-all text-gray-800 placeholder-gray-500 text-base"
+                  className="w-full pl-14 pr-4 py-4 rounded-l-full focus:outline-none transition-all text-gray-900 placeholder-gray-800 font-medium text-base bg-transparent"
                 />
                 
                 {/* Search Dropdown */}
@@ -449,8 +470,8 @@ export default function HeroAbout() {
               </div>
 
               {/* Separator Line */}
-              <div className="hidden md:flex items-center">
-                <div className="w-px h-10 bg-gray-200" />
+              <div className="hidden md:flex items-center h-8">
+                <div className="w-px h-full bg-gray-200" />
               </div>
 
               {/* Location Input */}
@@ -470,10 +491,9 @@ export default function HeroAbout() {
                     setShowLocationDropdown(true);
                   }}
                   onBlur={(e) => {
-                    // Don't close on blur - let click outside handler manage closing
-                    // This prevents the dropdown from closing when clicking inside it
+                    // Don't close on blur
                   }}
-                  className="w-full pl-12 pr-4 py-3 rounded-full focus:border-black focus:outline-none focus:ring-2 focus:ring-black/5 transition-all text-gray-800 placeholder-gray-500 text-base"
+                  className="w-full pl-12 pr-4 py-3 focus:outline-none transition-all text-gray-900 placeholder-gray-500 text-base bg-transparent font-medium"
                 />
                 
                 {/* Location Dropdown */}
@@ -640,9 +660,10 @@ export default function HeroAbout() {
               </div>
 
               {/* Search Button */}
-              <button
-                className="bg-[#171717] text-white px-8 py-3 rounded-full font-medium hover:bg-gray-900 transition-all duration-300 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 w-full md:w-auto text-base"
-                onClick={() => {
+              <div className="w-full md:w-auto px-2 pb-2 md:pb-0 md:px-0">
+                <button
+                  className="bg-[#101928] text-white px-8 py-3.5 rounded-full font-medium hover:bg-black transition-all duration-300 flex items-center justify-center gap-2 w-full md:w-auto text-base shadow-sm"
+                  onClick={() => {
                   const params = new URLSearchParams();
                   const trimmedQuery = searchQuery.trim();
                   
@@ -667,19 +688,87 @@ export default function HeroAbout() {
                 }}
               >
                 <Search className="w-5 h-5" />
-                <span className="hidden md:inline">Rechercher</span>
-                <span className="md:hidden">Rechercher</span>
-              </button>
+                <span className="hidden md:inline font-semibold">Rechercher</span>
+                <span className="md:hidden font-semibold">Rechercher</span>
+                </button>
+              </div>
             </div>
           </div>
           {/* Popular Categories */}
           {/* Removed Populaire and category buttons */}
         </div>
 
+        {/* Counter and Download App Button */}
+        <div className="mt-8 flex flex-col items-center justify-center gap-5 text-center animate-slide-up-3">
+          <div className="flex items-center justify-center gap-1.5 text-[#111827] text-base sm:text-lg font-medium">
+            <span className="inline-flex items-center gap-0.5">
+              {count.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ").split('').map((char, idx) => (
+                <DigitRoll key={idx} val={char} />
+              ))}
+            </span>
+            <span className="text-gray-900 font-medium">rendez-vous pris aujourd&apos;hui</span>
+          </div>
+
+          <button className="flex items-center gap-2 bg-white hover:bg-gray-50 text-gray-950 px-5 py-2.5 rounded-full font-semibold shadow-sm transition-all active:scale-[0.98] border border-gray-200/80 text-sm">
+            <span>Télécharger l&apos;app</span>
+            <QrCode className="w-4 h-4 text-gray-700" />
+          </button>
+        </div>
+
       </div>
 
       {/* Bottom Gradient Fade */}
-      <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white dark:from-zinc-900 to-transparent" />
+      <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-white to-transparent" />
+
+      <style jsx>{`
+        @keyframes slideUpFade {
+          from { opacity: 0; transform: translateY(40px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-slide-up-1 {
+          animation: slideUpFade 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        .animate-slide-up-2 {
+          animation: slideUpFade 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.15s forwards;
+          opacity: 0;
+        }
+        .animate-slide-up-3 {
+          animation: slideUpFade 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s forwards;
+          opacity: 0;
+        }
+        @keyframes float-slow {
+          0% { transform: translateY(0) rotate(-6deg) scale(1); }
+          50% { transform: translateY(-20px) rotate(-4deg) scale(1.02); }
+          100% { transform: translateY(0) rotate(-6deg) scale(1); }
+        }
+        @keyframes float-slow-reverse {
+          0% { transform: translateY(0) rotate(3deg) scale(1); }
+          50% { transform: translateY(25px) rotate(5deg) scale(1.03); }
+          100% { transform: translateY(0) rotate(3deg) scale(1); }
+        }
+        @keyframes float-medium {
+          0% { transform: translateY(0) rotate(6deg); }
+          50% { transform: translateY(-30px) rotate(4deg); }
+          100% { transform: translateY(0) rotate(6deg); }
+        }
+        @keyframes float-medium-reverse {
+          0% { transform: translateY(0) rotate(-3deg); }
+          50% { transform: translateY(20px) rotate(-5deg); }
+          100% { transform: translateY(0) rotate(-3deg); }
+        }
+        .animate-float-slow {
+          animation: float-slow 18s ease-in-out infinite;
+        }
+        .animate-float-slow-reverse {
+          animation: float-slow-reverse 22s ease-in-out infinite;
+        }
+        .animate-float-medium {
+          animation: float-medium 15s ease-in-out infinite;
+        }
+        .animate-float-medium-reverse {
+          animation: float-medium-reverse 17s ease-in-out infinite;
+        }
+      `}</style>
     </section>
   );
 }

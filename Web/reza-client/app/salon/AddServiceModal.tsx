@@ -132,7 +132,7 @@ const AddServiceModal: React.FC<AddServiceModalProps> = ({
             
             {/* Selected count indicator */}
             {selectedServices.length > 0 && (
-              <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#8b7260] text-white text-sm">
+              <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#101828] text-white text-sm">
                 <Check className="w-4 h-4" />
                 <span className="font-medium">{selectedServices.length} service{selectedServices.length > 1 ? 's' : ''} sélectionné{selectedServices.length > 1 ? 's' : ''}</span>
               </div>
@@ -161,7 +161,7 @@ const AddServiceModal: React.FC<AddServiceModalProps> = ({
                           onClick={() => handleToggle(service)}
                           className={`service-item ${selected ? 'selected' : ''} w-full flex items-center justify-between px-5 py-4 rounded-xl transition-all text-left ${
                             selected
-                              ? 'bg-[#8b7260] text-white border border-[#8b7260]'
+                              ? 'bg-[#101828] text-white border border-[#101828]'
                               : 'bg-[#f5f7f3] hover:bg-gray-50 text-gray-900 border border-gray-300'
                           }`}
                         >
@@ -182,7 +182,7 @@ const AddServiceModal: React.FC<AddServiceModalProps> = ({
                           
                           <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition-all ${
                             selected 
-                              ? 'bg-white text-[#8b7260]' 
+                              ? 'bg-white text-[#101828]' 
                               : 'border-2 border-gray-300'
                           }`}>
                             {selected && (
@@ -208,7 +208,7 @@ const AddServiceModal: React.FC<AddServiceModalProps> = ({
             </button>
             <button
               onClick={handleFinish}
-              className="px-8 py-2 rounded-full bg-[#8b7260] text-white font-medium hover:bg-[#6d5a4d] transition-all"
+              className="px-8 py-2 rounded-full bg-[#101828] text-white font-medium hover:bg-[#1d2939] transition-all"
             >
               Terminer
             </button>

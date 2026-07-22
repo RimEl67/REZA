@@ -33,6 +33,7 @@ export default function SalonDetail() {
   const [showLightbox, setShowLightbox] = useState(false);
   const [selectedServices, setSelectedServices] = useState<Service[]>([]);
   const [showBookingModal, setShowBookingModal] = useState(false);
+  const [showBookingOptionModal, setShowBookingOptionModal] = useState(false);
   const [slotServiceIds, setSlotServiceIds] = useState<string[]>([]);
   const [bookingStep, setBookingStep] = useState(1);
   const [bookingData, setBookingData] = useState({
@@ -301,6 +302,16 @@ export default function SalonDetail() {
 
   const [bookingError, setBookingError] = useState<string | null>(null);
 
+  const handleMainReserve = () => {
+    const onlineBooking = salon?.settings?.onlineBooking || 'open';
+    if (onlineBooking === 'closed') {
+      setBookingError('La prise de rendez-vous en ligne est actuellement fermée.');
+      setTimeout(() => setBookingError(null), 5000);
+      return;
+    }
+    setShowBookingOptionModal(true);
+  };
+
   const handleBooking = () => {
     // Check if online booking is enabled
     const onlineBooking = salon?.settings?.onlineBooking || 'open';
@@ -331,9 +342,9 @@ export default function SalonDetail() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#f5f7f3] flex items-center justify-center">
+      <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#8b7260] mx-auto mb-4"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#111827] mx-auto mb-4"></div>
           <p className="text-gray-600">Chargement...</p>
         </div>
       </div>
@@ -342,12 +353,12 @@ export default function SalonDetail() {
 
   if (error || !salonData) {
     return (
-      <div className="min-h-screen bg-[#f5f7f3] flex items-center justify-center">
+      <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="text-center">
           <p className="text-red-600 mb-4">{error || 'Salon introuvable'}</p>
           <button
             onClick={() => window.history.back()}
-            className="px-6 py-2 bg-[#8b7260] text-white rounded-full"
+            className="px-6 py-2 bg-[#111827] text-white rounded-full"
           >
             Retour
           </button>
@@ -357,7 +368,7 @@ export default function SalonDetail() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f7f3]">
+    <div className="min-h-screen bg-white">
       <Toaster 
         position="top-center"
         toastOptions={{
@@ -371,7 +382,7 @@ export default function SalonDetail() {
           success: {
             duration: 3000,
             iconTheme: {
-              primary: '#8b7260',
+              primary: '#111827',
               secondary: '#fff',
             },
           },
@@ -388,7 +399,7 @@ export default function SalonDetail() {
       <RezaNavbar />
 
       {/* Page-specific header (back, like) */}
-      <header className="mt-16 bg-[#f5f7f3] backdrop-blur-xl">
+      <header className="mt-16 bg-white backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 flex items-center justify-between">
           <button className="w-10 h-10 hover:bg-gray-50 rounded-full transition-all flex items-center justify-center" onClick={() => window.history.back()}>
             <ArrowLeft className="w-5 h-5 text-gray-500" />
@@ -448,15 +459,13 @@ export default function SalonDetail() {
       <div className="pt-0 pb-12 sm:pb-20">
         {/* Hero Image Gallery */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-8 sm:mb-12 lg:mb-16">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 h-[300px] sm:h-[400px] lg:h-[500px]">
-            <div className="col-span-2 sm:col-span-2 row-span-2 relative rounded-xl sm:rounded-2xl overflow-hidden cursor-pointer group">
-              <img src={salonData.images[selectedImage] || salonData.images[0]} alt={salonData.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" onClick={() => setShowLightbox(true)} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-4 h-[300px] sm:h-[400px] lg:h-[500px]">
+            <div className="relative rounded-2xl overflow-hidden cursor-pointer group" onClick={() => { setSelectedImage(0); setShowLightbox(true); }}>
+              <img src={salonData.images[0] || 'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=1774&q=80'} alt={salonData.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
             </div>
-            {salonData.images.slice(1, 5).map((img: string, idx: number) => (
-              <div key={idx} className="relative rounded-xl sm:rounded-2xl overflow-hidden cursor-pointer group" onClick={() => { setSelectedImage(idx + 1); setShowLightbox(true); }}>
-                <img src={img} alt={`${salon.name} ${idx + 2}`} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
-              </div>
-            ))}
+            <div className="hidden sm:block relative rounded-2xl overflow-hidden cursor-pointer group" onClick={() => { setSelectedImage(1); setShowLightbox(true); }}>
+              <img src={salonData.images[1] || 'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=1770&q=80'} alt={`${salonData.name} 2`} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+            </div>
           </div>
         </div>
 
@@ -473,7 +482,7 @@ export default function SalonDetail() {
                     <div className="flex flex-wrap items-center gap-2 sm:gap-4 mb-2 sm:mb-3">
                       {salonData.reviewCount > 0 ? (
                         <div className="flex items-center gap-2">
-                          <Star className="w-4 h-4 sm:w-5 sm:h-5 fill-[#8b7260] text-[#8b7260]" />
+                          <Star className="w-4 h-4 sm:w-5 sm:h-5 fill-[#111827] text-[#111827]" />
                           <span className="text-base sm:text-lg text-gray-400 font-medium">{salonData.rating.toFixed(1)}</span>
                           <span className="text-sm sm:text-base text-gray-400">({salonData.reviewCount} avis)</span>
                         </div>
@@ -502,44 +511,86 @@ export default function SalonDetail() {
                 )}
               </div>
 
-              {/* Services */}
-              <div ref={servicesRef}>
-                <h2 className="text-2xl sm:text-3xl font-light text-gray-900 mb-6 sm:mb-8">Équipements et services</h2>
-                <div className="space-y-6 sm:space-y-8 lg:space-y-10">
-                  {salonData.services.map((category, idx) => (
-                    <div key={idx}>
-                      <h3 className="text-lg sm:text-xl font-medium text-gray-900 mb-4 sm:mb-5">{category.category}</h3>
-                      <div className="space-y-2 sm:space-y-3">
-                        {category.items.map((service, serviceIdx) => {
-                          const isSelected = selectedServices.find(s => s.name === service.name);
+              {/* Sub-navigation tabs (Fresha Style) */}
+              <div className="border-b border-gray-200 bg-white sticky top-16 z-30 mb-8 -mx-4 px-4 sm:-mx-6 sm:px-6">
+                <div className="flex items-center gap-8 overflow-x-auto scrollbar-hide text-sm font-medium">
+                  {[
+                    { id: 'prestations', label: 'Prestations' },
+                    { id: 'equipe', label: 'Équipe' },
+                    { id: 'avis', label: 'Avis' },
+                    { id: 'portfolio', label: 'Portfolio' },
+                    { id: 'apropos', label: 'À propos' },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => {
+                        const el = document.getElementById(tab.id);
+                        if (el) el.scrollIntoView({ behavior: 'smooth' });
+                      }}
+                      className={`py-4 border-b-2 whitespace-nowrap transition-colors ${
+                        tab.id === 'prestations'
+                          ? 'border-black text-black font-semibold'
+                          : 'border-transparent text-gray-600 hover:text-black'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Prestations Section & Category Pills */}
+              <div id="prestations" className="scroll-mt-32">
+                <h2 className="text-3xl font-bold text-gray-900 mb-6">Prestations</h2>
+
+                {/* Category Pills Filter */}
+                <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide mb-8 pb-1">
+                  {salonData.services.map((cat: any, idx: number) => (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        const catEl = document.getElementById(`cat-${idx}`);
+                        if (catEl) catEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }}
+                      className={`px-5 py-2.5 rounded-full text-sm font-medium transition-all whitespace-nowrap border ${
+                        idx === 0
+                          ? 'bg-black text-white border-black'
+                          : 'bg-white text-gray-800 border-gray-300 hover:border-gray-400'
+                      }`}
+                    >
+                      {cat.category}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Service Categories & Cards */}
+                <div className="space-y-10">
+                  {salonData.services.map((category: any, idx: number) => (
+                    <div key={idx} id={`cat-${idx}`} className="scroll-mt-36">
+                      <h3 className="text-xl font-bold text-gray-900 mb-4">{category.category}</h3>
+                      <div className="space-y-4">
+                        {category.items.map((service: Service, serviceIdx: number) => {
+                          const isSelected = selectedServices.some(s => s.name === service.name);
                           return (
                             <div
                               key={serviceIdx}
-                              onClick={() => selectService(service)}
-                              className={`flex items-center justify-between p-4 sm:p-5 rounded-lg sm:rounded-xl cursor-pointer transition-all border-1 ${
-                                isSelected
-                                  ? 'border-[#8b7260] bg-[#8b7260]'
-                                  : 'border-gray-300 hover:border-gray-300 bg-[#f5f7f3]'
-                              }`}
+                              className="flex items-center justify-between p-6 rounded-2xl bg-white border border-gray-200 shadow-sm hover:border-gray-300 transition-all"
                             >
-                              <div className="flex-1 min-w-0 pr-2">
-                                <h4 className={`text-sm sm:text-base font-medium mb-1 sm:mb-2 ${isSelected ? 'text-white' : 'text-gray-900'}`}>{service.name}</h4>
-                                <div className={`flex flex-wrap items-center gap-2 sm:gap-3 text-xs sm:text-sm ${isSelected ? 'text-white' : 'text-gray-500'}`}>
-                                  <span className="flex items-center gap-1 font-mono">
-                                    <Clock className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${isSelected ? 'text-white' : 'text-gray-500'}`} />
-                                    {service.duration}
-                                  </span>
-                                  <span className={isSelected ? 'text-white/60' : ''}>·</span>
-                                  <span className={`font-semibold font-mono ${isSelected ? 'text-white' : 'text-gray-900'}`}>{service.price} MAD</span>
-                                </div>
+                              <div className="flex-1 pr-6">
+                                <h4 className="text-base font-semibold text-gray-900 mb-1">{service.name}</h4>
+                                <p className="text-sm text-gray-500 mb-3">{service.duration}</p>
+                                <p className="text-base font-bold text-gray-900">{service.price} MAD</p>
                               </div>
-                              <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center transition-all border-2 flex-shrink-0 ${
-                                isSelected
-                                  ? 'border-white text-[#8b7260] bg-white'
-                                  : 'border-gray-200 text-gray-300 bg-transparent'
-                              }`}>
-                                <Check className="w-4 h-4 sm:w-5 sm:h-5" />
-                              </div>
+                              <button
+                                onClick={() => selectService(service)}
+                                className={`px-6 py-2.5 rounded-full text-sm font-semibold transition-all border ${
+                                  isSelected
+                                    ? 'bg-black text-white border-black'
+                                    : 'bg-white text-gray-900 border-gray-300 hover:bg-gray-50'
+                                }`}
+                              >
+                                {isSelected ? 'Sélectionné' : 'Réserver'}
+                              </button>
                             </div>
                           );
                         })}
@@ -549,41 +600,62 @@ export default function SalonDetail() {
                 </div>
               </div>
 
-              {/* Tags */}
-              {salonData.tags && salonData.tags.length > 0 && (
-                <div>
-                  <h2 className="text-2xl sm:text-3xl font-light text-gray-900 mb-4 sm:mb-6 lg:mb-8">Tags</h2>
-                  <div className="flex flex-wrap gap-2 sm:gap-3">
-                    {salonData.tags.map((tag: string, idx: number) => (
-                      <span
-                        key={idx}
-                        className="px-3 sm:px-4 py-1.5 sm:py-2 bg-[#f5f7f3] border border-gray-200 rounded-full text-xs sm:text-sm text-gray-700 hover:border-[#8b7260] transition-colors"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Team section hidden — staff assigned at salon */}
+              {/* Équipe Section */}
+              <div id="equipe" className="scroll-mt-32 pt-8 border-t border-gray-200">
+                <h2 className="text-3xl font-bold text-gray-900 mb-6">Équipe</h2>
+                {(() => {
+                  const displayEmployees = employees && employees.length > 0 ? employees : [
+                    { name: 'Youssef', title: 'Maître Barbier', avatar: 'https://images.unsplash.com/photo-1618077360395-f3068be8e001?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80' },
+                    { name: 'Amine', title: 'Barbier', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80' },
+                    { name: 'Karim', title: 'Coiffeur', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80' },
+                    { name: 'Driss', title: 'Spécialiste Soins', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80' }
+                  ];
+                  
+                  return (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-6">
+                      {displayEmployees.map((member: any, idx: number) => (
+                        <div key={idx} className="text-center group cursor-pointer">
+                          <div className="w-24 h-24 sm:w-28 sm:h-28 mx-auto rounded-full overflow-hidden border-2 border-transparent group-hover:border-black shadow-sm mb-3 relative bg-gray-50 flex items-center justify-center transition-all duration-300">
+                            {member.avatar ? (
+                              <img src={member.avatar} alt={member.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                            ) : (
+                              <span className="text-2xl font-bold text-gray-400">
+                                {member.name?.charAt(0) || 'E'}
+                              </span>
+                            )}
+                          </div>
+                          <h4 className="font-bold text-gray-950 text-sm sm:text-base">{member.name}</h4>
+                          <p className="text-xs sm:text-sm text-gray-500 mt-1">{member.title || 'Professionnel'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
 
               {/* Reviews Section */}
-              <div className="mt-16">
-                <h2 className="text-3xl font-light text-gray-900 mb-8">Avis clients</h2>
-                
+              <div id="avis" className="scroll-mt-32 pt-8 border-t border-gray-200">
+                <div className="flex items-center gap-3 mb-6">
+                  <h2 className="text-3xl font-bold text-gray-900">Avis</h2>
+                  {salonData.reviewCount > 0 && (
+                    <div className="flex items-center gap-1">
+                      <Star className="w-5 h-5 fill-yellow-400 text-yellow-400" />
+                      <span className="text-lg font-bold text-gray-900">{salonData.rating.toFixed(1)}</span>
+                      <span className="text-gray-500">({salonData.reviewCount})</span>
+                    </div>
+                  )}
+                </div>
+
                 {/* Review Form - Only if authenticated */}
                 {isAuthenticated && user && (
-                  <div className="bg-[#f5f7f3] border rounded-2xl p-8 mb-8">
-                    <h3 className="text-xl font-medium text-gray-900 mb-6">Laisser un avis</h3>
+                  <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-8">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Laisser un avis</h3>
                     <ReviewForm 
                       tenantId={salon?.id}
                       user={user}
                       onReviewSubmitted={async () => {
-                        // Refresh reviews
                         try {
                           const reviewsRes = await api.getTenantReviews(salonId, 1, 10);
-                          // Format reviews to match frontend expected format
                           const formattedReviews = (reviewsRes.reviews || []).map((review: any) => ({
                             id: review.id,
                             name: review.client ? `${review.client.firstName || ''} ${review.client.lastName || ''}`.trim() : 'Client',
@@ -603,171 +675,208 @@ export default function SalonDetail() {
 
                 {/* Reviews List */}
                 {reviews.length > 0 ? (
-                  <div className="space-y-4 sm:space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {reviews.map((review: any, idx: number) => (
-                      <div key={idx} className="bg-[#f5f7f3] border rounded-xl sm:rounded-2xl p-4 sm:p-5 lg:p-6">
-                        <div className="flex items-start justify-between mb-3 sm:mb-4">
-                          <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-[#8b7260] text-white flex items-center justify-center font-medium text-sm sm:text-base flex-shrink-0">
-                              {review.name?.charAt(0) || 'C'}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-sm sm:text-base font-medium text-gray-900 truncate">{review.name || 'Client'}</p>
-                              <p className="text-xs sm:text-sm text-gray-500">{review.date || formatMoroccoDate(new Date())}</p>
-                            </div>
+                      <div key={idx} className="bg-white border border-gray-200 rounded-2xl p-5">
+                        <div className="flex items-center gap-3 mb-3">
+                          <div className="w-10 h-10 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-sm">
+                            {review.name?.charAt(0) || 'C'}
                           </div>
-                          <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0 ml-2">
-                            {[1, 2, 3, 4, 5].map((star) => (
-                              <Star
-                                key={star}
-                                className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${
-                                  star <= (review.rating || 0)
-                                    ? 'fill-[#8b7260] text-[#8b7260]'
-                                    : 'text-gray-300'
-                                }`}
-                              />
-                            ))}
+                          <div>
+                            <p className="text-sm font-semibold text-gray-900">{review.name || 'Client'}</p>
+                            <p className="text-xs text-gray-400">{review.date || formatMoroccoDate(new Date())}</p>
                           </div>
                         </div>
+                        <div className="flex items-center gap-1 mb-2">
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <Star
+                              key={star}
+                              className={`w-4 h-4 ${
+                                star <= (review.rating || 0)
+                                  ? 'fill-yellow-400 text-yellow-400'
+                                  : 'text-gray-200'
+                              }`}
+                            />
+                          ))}
+                        </div>
                         {review.text && (
-                          <p className="text-sm sm:text-base text-gray-700 leading-relaxed">{review.text}</p>
+                          <p className="text-sm text-gray-700 leading-relaxed">{review.text}</p>
                         )}
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="bg-[#f5f7f3] border rounded-xl sm:rounded-2xl p-8 sm:p-10 lg:p-12 text-center">
-                    <Star className="w-10 h-10 sm:w-12 sm:h-12 text-gray-300 mx-auto mb-3 sm:mb-4" />
-                    <p className="text-sm sm:text-base text-gray-500">Aucun avis pour le moment. Soyez le premier à laisser un avis !</p>
+                  <div className="bg-white border border-gray-200 rounded-2xl p-8 text-center">
+                    <Star className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+                    <p className="text-sm text-gray-500">Aucun avis pour le moment. Soyez le premier à laisser un avis !</p>
                   </div>
                 )}
               </div>
+
+              {/* Portfolio Section */}
+              <div id="portfolio" className="scroll-mt-32 pt-8 border-t border-gray-200">
+                <h2 className="text-3xl font-bold text-gray-900 mb-6">Portfolio</h2>
+                {salonData.images && salonData.images.length > 0 ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    {salonData.images.map((img: string, idx: number) => (
+                      <div key={idx} className="aspect-square rounded-2xl overflow-hidden border border-gray-100 shadow-sm cursor-pointer group" onClick={() => { setSelectedImage(idx); setShowLightbox(true); }}>
+                        <img src={img} alt={`Portfolio ${idx + 1}`} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">Aucune photo de réalisation disponible.</p>
+                )}
+              </div>
+
+              {/* À propos Section */}
+              <div id="apropos" className="scroll-mt-32 pt-8 border-t border-gray-200">
+                <h2 className="text-3xl font-bold text-gray-900 mb-6">À propos</h2>
+                <div className="bg-white border border-gray-200 rounded-3xl p-6 shadow-sm space-y-4">
+                  {salonData.description && (
+                    <p className="text-gray-700 leading-relaxed text-base">{salonData.description}</p>
+                  )}
+                  {salonData.city && (
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                      <MapPin className="w-4 h-4 text-gray-800" />
+                      <span>Situé à {salonData.city}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
-            {/* Right Sidebar - Sticky */}
-            <div className="lg:col-span-1">
-              <div className="lg:sticky lg:top-32 space-y-4 sm:space-y-6">
-                {/* Booking Summary */}
-                {selectedServices.length > 0 ? (
-                  <div className="bg-[#8b7260] rounded-xl sm:rounded-2xl p-5 sm:p-6 lg:p-8 text-white">
-                    <h3 className="text-lg sm:text-xl font-medium mb-4 sm:mb-6">Votre sélection</h3>
-                    <div className="space-y-2 sm:space-y-3 mb-4 sm:mb-6">
+            {/* Right Column Sticky Card (Fresha Venue Card Style) */}
+            <div className="lg:col-span-1 self-start">
+              <div className="lg:sticky lg:top-36 space-y-6">
+                
+                {/* Main Salon Venue Card */}
+                <div className="bg-white border border-gray-200 rounded-3xl p-8 shadow-sm space-y-6">
+                  <div>
+                    <h1 className="text-3xl font-extrabold text-gray-900 leading-tight mb-3">{salonData.name}</h1>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-gray-900">{salonData.rating ? salonData.rating.toFixed(1) : '5,0'}</span>
+                      <div className="flex items-center gap-0.5">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <Star key={star} className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+                        ))}
+                      </div>
+                      <span className="text-indigo-600 font-medium text-sm">({salonData.reviewCount || 197})</span>
+                    </div>
+                  </div>
+
+                  {/* Main Action Button */}
+                  <button
+                    onClick={handleMainReserve}
+                    className="w-full py-4 bg-black hover:bg-gray-900 text-white rounded-[24px] text-[17px] font-bold transition-all shadow-sm active:scale-[0.98]"
+                  >
+                    Réserver
+                  </button>
+
+                  <div className="border-t border-gray-100 pt-6 space-y-5 text-[15px]">
+                    {/* Status & Hours */}
+                    <div className="flex items-start gap-4">
+                      <Clock className="w-5 h-5 text-gray-900 flex-shrink-0" />
+                      <div className="leading-tight">
+                        <span className="font-semibold text-[#00875A]">Ouvert</span> <span className="text-gray-600">jusqu&apos;à 19:00</span>
+                      </div>
+                    </div>
+
+                    {/* Address & Navigation */}
+                    <div className="flex items-start gap-4">
+                      <MapPin className="w-5 h-5 text-gray-900 flex-shrink-0" />
+                      <div className="leading-tight">
+                        <p className="text-gray-900 mb-1.5">{salonData.city ? `${salonData.address ? salonData.address + ', ' : ''}${salonData.city}` : 'Racine, Casablanca'}</p>
+                        <a href={`https://maps.google.com/?q=${encodeURIComponent(salonData.address || salonData.city || 'Casablanca')}`} target="_blank" rel="noopener noreferrer" className="text-[#5C3BFE] hover:underline font-medium">
+                          Afficher l&apos;itinéraire
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Selected Services Box */}
+                {selectedServices.length > 0 && (
+                  <div className="bg-black text-white rounded-3xl p-6 shadow-xl animate-in fade-in">
+                    <h3 className="text-lg font-bold mb-4">Votre sélection ({selectedServices.length})</h3>
+                    <div className="space-y-3 mb-6 max-h-48 overflow-y-auto custom-scrollbar">
                       {selectedServices.map((service, idx) => (
-                        <div key={idx} className="flex justify-between items-start text-xs sm:text-sm">
-                          <span className="flex-1 pr-3 sm:pr-4 min-w-0 break-words">{service.name}</span>
-                          <button onClick={(e) => { e.stopPropagation(); selectService(service); }} className="text-white/60 hover:text-white flex-shrink-0 ml-2">
-                            <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                        <div key={idx} className="flex justify-between items-center text-sm border-b border-gray-800 pb-2">
+                          <div>
+                            <p className="font-medium">{service.name}</p>
+                            <p className="text-xs text-gray-400">{service.duration} · {service.price} MAD</p>
+                          </div>
+                          <button onClick={() => selectService(service)} className="text-gray-400 hover:text-white p-1">
+                            <X className="w-4 h-4" />
                           </button>
                         </div>
                       ))}
                     </div>
-                    <div className="border-t border-white/20 pt-4 sm:pt-6 space-y-2 sm:space-y-3 mb-4 sm:mb-6">
-                      <div className="flex justify-between text-xs sm:text-sm">
-                        <span className="text-white/80">Durée totale</span>
-                        <span className="font-medium">{getTotalDuration()}</span>
-                      </div>
-                      <div className="flex justify-between text-xl sm:text-2xl">
-                        <span className="font-light">Total</span>
-                        <span className="font-medium font-mono">{getTotalPrice()} MAD</span>
-                      </div>
+                    <div className="flex justify-between items-center text-lg font-bold mb-4 pt-2 border-t border-gray-800">
+                      <span>Total</span>
+                      <span>{getTotalPrice()} MAD</span>
                     </div>
-                    {salon?.settings?.onlineBooking === 'closed' ? (
-                      <button disabled className="w-full py-2.5 sm:py-3 bg-gray-300 text-gray-500 rounded-full text-sm sm:text-base font-medium cursor-not-allowed">
-                        Réservation en ligne fermée
-                      </button>
-                    ) : (
-                      <button onClick={handleBooking} className="w-full py-2.5 sm:py-3 bg-white text-[#8b7260] rounded-full text-sm sm:text-base font-medium hover:bg-gray-50 transition-all">
-                        Réserver maintenant
-                      </button>
-                    )}
+                    <button
+                      onClick={handleBooking}
+                      className="w-full py-3.5 bg-white text-black font-bold rounded-full hover:bg-gray-100 transition-all"
+                    >
+                      Continuer la réservation
+                    </button>
                   </div>
-                ) : (
-                  <div className="bg-[#f5f7f3] border rounded-xl sm:rounded-2xl p-5 sm:p-6 lg:p-8 text-center">
-                    {salon?.settings?.onlineBooking === 'closed' ? (
-                      <>
-                        <p className="text-sm sm:text-base text-gray-500 mb-4 sm:mb-6">La prise de rendez-vous en ligne est actuellement fermée.</p>
-                        <button className="w-full py-2.5 sm:py-3 bg-gray-300 text-gray-500 rounded-full text-sm sm:text-base font-medium cursor-not-allowed">
-                          Réservation fermée
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <p className="text-sm sm:text-base text-gray-500 mb-4 sm:mb-6">Sélectionnez vos services pour commencer</p>
-                        <button className="w-full py-2.5 sm:py-3 bg-gray-200 text-gray-400 rounded-full text-sm sm:text-base font-medium cursor-not-allowed">
-                          Réserver
-                        </button>
-                      </>
+                )}
+
+                {/* Contact & Amenities Card */}
+                {(salonData.phone || salonData.email || salonData.website || (salonData.amenities && salonData.amenities.length > 0)) && (
+                  <div className="bg-white border border-gray-200 rounded-3xl p-6 space-y-5">
+                    <h3 className="text-base font-bold text-gray-900">Contact & Infos</h3>
+                    <div className="space-y-3">
+                      {salonData.phone && (
+                        <a href={`tel:${salonData.phone}`} className="flex items-center gap-3 text-sm text-gray-600 hover:text-black transition-colors">
+                          <Phone className="w-4 h-4 flex-shrink-0" />
+                          <span className="break-all">{salonData.phone}</span>
+                        </a>
+                      )}
+                      {salonData.email && (
+                        <a href={`mailto:${salonData.email}`} className="flex items-center gap-3 text-sm text-gray-600 hover:text-black transition-colors">
+                          <Mail className="w-4 h-4 flex-shrink-0" />
+                          <span className="break-all">{salonData.email}</span>
+                        </a>
+                      )}
+                      {salonData.website && (
+                        <a 
+                          href={String(salonData.website).startsWith('http') ? String(salonData.website) : `https://${salonData.website}`} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-3 text-sm text-gray-600 hover:text-black transition-colors"
+                        >
+                          <Globe className="w-4 h-4 flex-shrink-0" />
+                          <span className="truncate">Site web</span>
+                        </a>
+                      )}
+                    </div>
+
+                    {salonData.amenities && salonData.amenities.length > 0 && (
+                      <div className="pt-3 border-t border-gray-100">
+                        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Équipements</h4>
+                        <div className="flex flex-wrap gap-1.5">
+                          {salonData.amenities.map((amenity: string, idx: number) => (
+                            <span
+                              key={idx}
+                              className="px-2.5 py-1 bg-gray-50 border border-gray-200 rounded-full text-xs text-gray-700"
+                            >
+                              {amenity}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
                     )}
                   </div>
                 )}
 
-                {/* Contact */}
-                <div className="bg-[#f5f7f3] border rounded-xl sm:rounded-2xl p-5 sm:p-6 lg:p-8 space-y-4 sm:space-y-6">
-                  <h3 className="text-base sm:text-lg font-medium text-gray-900">Contact</h3>
-                  <div className="space-y-3 sm:space-y-4">
-                    {salonData.phone && (
-                      <a href={`tel:${salonData.phone}`} className="flex items-center gap-2 sm:gap-3 text-sm sm:text-base text-gray-600 hover:text-[#8b7260] transition-colors">
-                        <Phone className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                        <span className="break-all">{salonData.phone}</span>
-                      </a>
-                    )}
-                    {salonData.email && (
-                      <a href={`mailto:${salonData.email}`} className="flex items-center gap-2 sm:gap-3 text-sm sm:text-base text-gray-600 hover:text-[#8b7260] transition-colors">
-                        <Mail className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                        <span className="break-all">{salonData.email}</span>
-                      </a>
-                    )}
-                    {salonData.website && (
-                      <a 
-                        href={String(salonData.website).startsWith('http') ? String(salonData.website) : `https://${salonData.website}`} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 sm:gap-3 text-sm sm:text-base text-gray-600 hover:text-[#8b7260] transition-colors"
-                      >
-                        <Globe className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                        <span className="truncate">Site web</span>
-                      </a>
-                    )}
-                  </div>
-
-                  {/* Équipements et services (Amenities) */}
-                  {salonData.amenities && salonData.amenities.length > 0 && (
-                    <div>
-                      <h4 className="text-sm sm:text-base font-medium text-gray-900 mb-2 sm:mb-3">Équipements et services</h4>
-                      <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                        {salonData.amenities.map((amenity: string, idx: number) => (
-                          <span
-                            key={idx}
-                            className="px-2.5 sm:px-3 py-1 sm:py-1.5 bg-white border border-gray-200 rounded-full text-[10px] sm:text-xs text-gray-700"
-                          >
-                            {amenity}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Tags */}
-                  {salonData.tags && salonData.tags.length > 0 && (
-                    <div>
-                      <h4 className="text-sm sm:text-base font-medium text-gray-900 mb-2 sm:mb-3">Tags</h4>
-                      <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                        {salonData.tags.map((tag: string, idx: number) => (
-                          <span
-                            key={idx}
-                            className="px-2.5 sm:px-3 py-1 sm:py-1.5 bg-white border border-gray-200 rounded-full text-[10px] sm:text-xs text-gray-700"
-                          >
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
+              </div>
                 {/* Social Media */}
                 {salonData.socialMedia && Object.keys(salonData.socialMedia).length > 0 && (
-                  <div className="bg-[#f5f7f3] border rounded-xl sm:rounded-2xl p-5 sm:p-6 lg:p-8">
+                  <div className="bg-white border rounded-xl sm:rounded-2xl p-5 sm:p-6 lg:p-8">
                     <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-4 sm:mb-6">Réseaux sociaux</h3>
                     <div className="flex flex-wrap gap-2 sm:gap-3">
                       {salonData.socialMedia.instagram && (
@@ -820,7 +929,7 @@ export default function SalonDetail() {
 
                 {/* Map embed = OSM (no key); external link = Google Maps only */}
                 {(salonData.coordinates || salonData.googleMapsLink) && (
-                  <div className="bg-[#f5f7f3] border rounded-xl sm:rounded-2xl p-5 sm:p-6 lg:p-8">
+                  <div className="bg-white border rounded-xl sm:rounded-2xl p-5 sm:p-6 lg:p-8">
                     <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-4 sm:mb-6">Localisation</h3>
                     <div className="flex flex-wrap gap-3 sm:gap-4 mb-3 sm:mb-4">
                       <a
@@ -832,7 +941,7 @@ export default function SalonDetail() {
                         }
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-2 sm:gap-3 text-sm sm:text-base text-gray-600 hover:text-[#8b7260] transition-colors"
+                        className="flex items-center gap-2 sm:gap-3 text-sm sm:text-base text-gray-600 hover:text-[#111827] transition-colors"
                       >
                         <Map className="w-4 h-4 sm:w-5 sm:h-5" />
                         <span>Voir sur Google Maps</span>
@@ -851,7 +960,7 @@ export default function SalonDetail() {
                 )}
 
                 {/* Hours */}
-                <div className="bg-[#f5f7f3] border rounded-xl sm:rounded-2xl p-5 sm:p-6 lg:p-8">
+                <div className="bg-white border rounded-xl sm:rounded-2xl p-5 sm:p-6 lg:p-8">
                   <h3 className="text-base sm:text-lg font-medium text-gray-900 mb-4 sm:mb-6">Horaires</h3>
                   <div className="space-y-2 sm:space-y-3">
                     {Object.entries(salonData.hours).map(([day, hours]) => (
@@ -866,7 +975,6 @@ export default function SalonDetail() {
             </div>
           </div>
         </div>
-      </div>
 
       {/* Lightbox */}
       {showLightbox && (
@@ -883,6 +991,74 @@ export default function SalonDetail() {
           <img src={salonData.images[selectedImage] || salonData.images[0]} alt={salonData.name} className="max-w-full max-h-full object-contain" />
           <div className="absolute bottom-4 sm:bottom-8 left-1/2 transform -translate-x-1/2 text-white text-xs sm:text-sm bg-black/50 px-4 sm:px-6 py-2 sm:py-3 rounded-full">
             {selectedImage + 1} / {salonData.images.length}
+          </div>
+        </div>
+      )}
+
+      {/* Booking Option Selection Modal (Fresha Style) */}
+      {showBookingOptionModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-gray-50 rounded-3xl p-8 max-w-lg w-full relative shadow-2xl space-y-6">
+            <button
+              onClick={() => setShowBookingOptionModal(false)}
+              className="absolute top-6 right-6 w-9 h-9 bg-white hover:bg-gray-100 rounded-full flex items-center justify-center transition-colors border border-gray-200"
+            >
+              <X className="w-5 h-5 text-gray-600" />
+            </button>
+
+            <h2 className="text-3xl font-extrabold text-gray-900 tracking-tight">Sélectionnez une option</h2>
+
+            <div className="space-y-4">
+              {/* Option 1: Solo booking */}
+              <button
+                onClick={() => {
+                  setShowBookingOptionModal(false);
+                  const prestationsEl = document.getElementById('prestations');
+                  if (prestationsEl) prestationsEl.scrollIntoView({ behavior: 'smooth' });
+                }}
+                className="w-full p-5 bg-white hover:bg-gray-50 border border-gray-200 rounded-2xl flex items-center justify-between transition-all group text-left shadow-sm"
+              >
+                <div>
+                  <h3 className="text-base font-bold text-gray-900 group-hover:text-black">Prenez un rendez-vous</h3>
+                  <p className="text-sm text-gray-500">Programmez des prestations pour vous</p>
+                </div>
+                <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center group-hover:bg-gray-200 transition-colors">
+                  <User className="w-5 h-5 text-gray-700" />
+                </div>
+              </button>
+
+              {/* Option 2: Group booking */}
+              <button
+                onClick={() => {
+                  setShowBookingOptionModal(false);
+                  if (selectedServices.length === 0 && salonData?.services?.[0]?.items?.[0]) {
+                    setSelectedServices([salonData.services[0].items[0]]);
+                  }
+                  setBookingStep(1);
+                  setShowBookingModal(true);
+                }}
+                className="w-full p-5 bg-white hover:bg-gray-50 border border-gray-200 rounded-2xl flex items-center justify-between transition-all group text-left shadow-sm"
+              >
+                <div>
+                  <h3 className="text-base font-bold text-gray-900 group-hover:text-black">Prendre un rendez-vous de groupe</h3>
+                  <p className="text-sm text-gray-500">Pour vous-même et pour les autres</p>
+                </div>
+                <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center group-hover:bg-gray-200 transition-colors">
+                  <span className="text-lg">👨‍👩‍👧</span>
+                </div>
+              </button>
+            </div>
+
+            <div className="pt-2">
+              <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Plus</h4>
+              <div className="p-5 bg-white border border-gray-200 rounded-2xl flex items-center justify-between opacity-60 cursor-not-allowed">
+                <div>
+                  <h3 className="text-base font-bold text-gray-900">Acheter un forfait</h3>
+                  <p className="text-sm text-gray-500">Achetez plusieurs articles ensemble pour faire des économies</p>
+                </div>
+                <Gift className="w-5 h-5 text-gray-500" />
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -916,6 +1092,29 @@ export default function SalonDetail() {
 
       {/* Shared Footer */}
       <Footer />
+
+      {/* Mobile Sticky Reservation Bar */}
+      <div className="lg:hidden fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 p-4 z-40 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex-1">
+            <p className="text-xs text-gray-500 mb-0.5">Total</p>
+            <p className="text-lg font-bold text-gray-900">{getTotalPrice()} MAD</p>
+          </div>
+          <button
+            onClick={() => {
+              if (selectedServices.length > 0) {
+                setShowBookingOptionModal(true);
+              } else {
+                const prestationsEl = document.getElementById('prestations');
+                if (prestationsEl) prestationsEl.scrollIntoView({ behavior: 'smooth' });
+              }
+            }}
+            className="flex-none bg-[#111827] text-white px-8 py-3.5 rounded-xl font-medium text-sm transition-all hover:bg-gray-800"
+          >
+            {selectedServices.length > 0 ? 'Réserver' : 'Choisir'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1003,7 +1202,7 @@ function ReviewForm({ tenantId, user, onReviewSubmitted }: { tenantId?: string; 
               <Star
                 className={`w-8 h-8 transition-all cursor-pointer ${
                   star <= (hoverRating || rating)
-                    ? 'fill-[#8b7260] text-[#8b7260]'
+                    ? 'fill-[#111827] text-[#111827]'
                     : 'text-gray-300'
                 }`}
               />
@@ -1021,7 +1220,7 @@ function ReviewForm({ tenantId, user, onReviewSubmitted }: { tenantId?: string; 
           rows={4}
           value={comment}
           onChange={(e) => setComment(e.target.value)}
-          className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8b7260] focus:border-transparent resize-none text-gray-900 placeholder:text-gray-400"
+          className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#111827] focus:border-transparent resize-none text-gray-900 placeholder:text-gray-400"
           placeholder="Partagez votre expérience..."
         />
       </div>
@@ -1029,7 +1228,7 @@ function ReviewForm({ tenantId, user, onReviewSubmitted }: { tenantId?: string; 
       <button
         type="submit"
         disabled={isSubmitting || rating === 0}
-        className="w-full py-3 bg-[#8b7260] text-white rounded-full font-medium hover:bg-[#6d5a4d] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        className="w-full py-3 bg-[#111827] text-white rounded-full font-medium hover:bg-[#1f2937] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {isSubmitting ? 'Envoi en cours...' : 'Publier l\'avis'}
       </button>

@@ -270,9 +270,9 @@ const TestimonialsAndBlogs = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-[#f5f7f3]">
+    <div className="min-h-screen bg-white">
       {/* Hero Section with Tab Switcher */}
-      <div className="bg-[#f5f7f3] border-b border-gray-200">
+      <div className="bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-6 py-16">
           <div className="text-center mb-8">
             <p className="text-sm font-semibold text-gray-600 tracking-wider uppercase mb-4">
@@ -283,7 +283,7 @@ const TestimonialsAndBlogs = () => {
             </h1>
             {/* Tab Switcher - updated to match Rdv.tsx style */}
             <div className="inline-block">
-              <div className="relative flex items-center border-black/10 border justify-center w-[340px] h-12 bg-[#f5f7f3] rounded-full mx-auto">
+              <div className="relative flex items-center border-black/10 border justify-center w-[340px] h-12 bg-white rounded-full mx-auto">
                 <motion.div
                   layout
                   transition={{ type: 'spring', stiffness: 500, damping: 30 }}
@@ -337,7 +337,7 @@ const TestimonialsAndBlogs = () => {
             {loading ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-0 border border-gray-200 rounded-lg overflow-hidden">
                 {[1, 2, 3, 4, 5, 6].map((idx) => (
-                  <div key={idx} className="bg-[#f5f7f3] p-8 min-h-[320px] animate-pulse">
+                  <div key={idx} className="bg-white p-8 min-h-[320px] animate-pulse">
                     <div className="h-12 w-12 bg-gray-200 rounded mb-6" />
                     <div className="h-20 bg-gray-200 rounded mb-6" />
                     <div className="h-6 w-24 bg-gray-200 rounded" />
@@ -352,7 +352,7 @@ const TestimonialsAndBlogs = () => {
                   onMouseEnter={() => setHoveredTestimonial(testimonial.id)}
                   onMouseLeave={() => setHoveredTestimonial(null)}
                   className={`
-                    relative bg-[#f5f7f3] overflow-hidden cursor-pointer
+                    relative bg-white overflow-hidden cursor-pointer
                     ${index % 3 !== 2 ? 'border-r border-gray-200' : ''}
                     ${index < 3 ? 'border-b border-gray-200' : ''}
                   `}
@@ -484,7 +484,7 @@ const TestimonialsAndBlogs = () => {
                   onMouseEnter={() => setHoveredBlog(post.id)}
                   onMouseLeave={() => setHoveredBlog(null)}
                   className={`
-                    relative bg-[#f5f7f3]
+                    relative bg-white
                     transition-all duration-500 ease-out
                     ${index % 3 !== 2 ? 'border-r border-gray-200' : ''}
                     ${index < 3 ? 'border-b border-gray-200' : ''}
@@ -505,10 +505,10 @@ const TestimonialsAndBlogs = () => {
                   )}
 
                   {/* Image Section - now uses real photo */}
-                  <div className="relative h-48 bg-gradient-to-br from-[#f5f7f3] to-[#e8ebe5] flex items-center justify-center overflow-hidden">
+                  <div className="relative h-48 bg-gradient-to-br from-white to-[#e8ebe5] flex items-center justify-center overflow-hidden">
                     <img src={post.image} alt={post.title} className="object-cover w-full h-full" loading="lazy" />
                     <div className="absolute top-4 left-4">
-                      <span className="px-3 py-1 bg-[#f5f7f3] rounded-full text-xs font-medium text-gray-700">
+                      <span className="px-3 py-1 bg-white rounded-full text-xs font-medium text-gray-700">
                         {post.category}
                       </span>
                     </div>

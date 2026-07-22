@@ -123,7 +123,7 @@ const Receipt: React.FC<ReceiptProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-[#f5f7f3] overflow-y-auto">
-      <div className="bg-[#8b7260] text-white py-6 px-6 text-center">
+      <div className="bg-[#101828] text-white py-6 px-6 text-center">
         <div className="flex items-center justify-center gap-3 mb-2">
           <CheckCircle className="w-6 h-6" />
           <h2 className="text-2xl font-semibold">Réservation enregistrée !</h2>

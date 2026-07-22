@@ -106,15 +106,15 @@ export default function GroupParticipantsSection({
   const chipClass = (selected: boolean) =>
     `px-3 py-1.5 rounded-full text-xs border transition-colors ${
       selected
-        ? 'bg-[#8b7260] text-white border-[#8b7260]'
-        : 'bg-white border-gray-300 text-gray-900 hover:border-[#8b7260]'
+        ? 'bg-[#101828] text-white border-[#101828]'
+        : 'bg-white border-gray-300 text-gray-900 hover:border-[#101828]'
     }`;
 
   return (
-    <div className="mt-6 mb-2 rounded-2xl border-2 border-[#8b7260]/20 bg-[#fafaf8] p-5">
+    <div className="mt-6 mb-2 rounded-2xl border-2 border-[#101828]/20 bg-[#fafaf8] p-5">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <Users className="w-5 h-5 text-[#8b7260]" />
+          <Users className="w-5 h-5 text-[#101828]" />
           <div>
             <h3 className="text-base font-semibold text-gray-900">
               Pour qui réservez-vous ?
@@ -127,7 +127,7 @@ export default function GroupParticipantsSection({
         <button
           type="button"
           onClick={addGuest}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm bg-[#8b7260] text-white hover:opacity-90"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm bg-[#101828] text-white hover:opacity-90"
         >
           <Plus className="w-4 h-4" />
           Ajouter
@@ -151,7 +151,7 @@ export default function GroupParticipantsSection({
 
         {!isAuthenticated && (
           <p className="text-sm text-gray-500">
-            <Link href="/login" className="text-[#8b7260] hover:underline">
+            <Link href="/login" className="text-[#101828] hover:underline">
               Connectez-vous
             </Link>{' '}
             pour sélectionner vos proches, ou ajoutez un invité manuellement.
@@ -174,7 +174,7 @@ export default function GroupParticipantsSection({
                   /* ignore */
                 }
               }}
-              className="text-[#8b7260] hover:underline"
+              className="text-[#101828] hover:underline"
             >
               Ajouter dans Mon compte
             </Link>
@@ -236,7 +236,7 @@ export default function GroupParticipantsSection({
                   {fromFamily ? (
                     <p className="py-2 text-sm text-gray-900 border-b border-gray-100">
                       {participant.name}
-                      <span className="ml-2 text-[10px] uppercase tracking-wide text-[#8b7260]">
+                      <span className="ml-2 text-[10px] uppercase tracking-wide text-[#101828]">
                         Proche
                       </span>
                     </p>
@@ -248,7 +248,7 @@ export default function GroupParticipantsSection({
                         updateParticipant(participant.id, { name: e.target.value })
                       }
                       placeholder="Prénom ou nom"
-                      className="w-full border-b border-gray-200 bg-transparent py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-[#8b7260]"
+                      className="w-full border-b border-gray-200 bg-transparent py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-[#101828]"
                     />
                   )}
                   <label className="flex items-center gap-2 text-sm text-gray-700">
@@ -281,7 +281,7 @@ export default function GroupParticipantsSection({
                             }}
                             className={`px-3 py-1 rounded-full text-xs border ${
                               selected
-                                ? 'bg-[#8b7260] text-white border-[#8b7260]'
+                                ? 'bg-[#101828] text-white border-[#101828]'
                                 : 'border-gray-300 text-gray-900'
                             }`}
                           >

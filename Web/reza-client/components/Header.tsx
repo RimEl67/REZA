@@ -133,8 +133,8 @@ const RezaNavbar = () => {
       <nav 
         className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
           isScrolled
-            ? 'bg-[#f5f7f3] backdrop-blur-xl'
-            : 'bg-[#f5f7f3] backdrop-blur-xl'
+            ? 'bg-white/95 backdrop-blur-md shadow-sm border-b border-gray-100'
+            : 'bg-transparent'
         }`}
         style={{ top: isScrolled ? 0 : 0 }}
       >
@@ -146,35 +146,12 @@ const RezaNavbar = () => {
               href="/" 
               className="flex-shrink-0 transition-transform duration-200 hover:scale-105 cursor-pointer"
             >
-              <div className="flex items-center gap-4">
-                {/* Logo Icon */}
-                <div className="relative w-12 h-12 group">
-                  {/* Logo Image */}
-                  <img
-                    src="/logos/logo-2.svg?v=rz1"
-                    alt="Reza Logo"
-                    className="absolute inset-0 w-full h-full object-cover"
-                  />
-                </div>
-
-                {/* Brand Text */}
-                <div className="flex flex-col">
-                  <span className={`font-thin text-[28px] tracking-[0.35em] leading-none transition-colors duration-300 ${
-                    isScrolled ? 'text-[#2F2E2C]' : 'text-[#2F2E2C]'
-                  }`}>
-                    REZA
-                  </span>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className={`w-6 h-[1px] transition-colors duration-300 ${
-                      isScrolled ? 'bg-gradient-to-r from-[#C57B57] to-transparent' : 'bg-gradient-to-r from-[#C57B57] to-transparent'
-                    }`} />
-                    <span className={`text-[7px] tracking-[0.5em] uppercase transition-colors duration-300 ${
-                      isScrolled ? 'text-[#8B7260] opacity-50' : 'text-[#8B7260] opacity-50'
-                    }`}>
-                      BEAUTY
-                    </span>
-                  </div>
-                </div>
+              <div className="flex items-center">
+                <span className={`font-bold text-[30px] tracking-[0.1em] uppercase transition-colors duration-300 ${
+                  isScrolled ? 'text-[#101928]' : 'text-[#101928]'
+                }`} style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+                  REZA
+                </span>
               </div>
             </a>
 
@@ -187,7 +164,7 @@ const RezaNavbar = () => {
                   className={`px-4 py-2 text-sm font-medium rounded-full transition-all duration-200 ${
                     isScrolled
                       ? 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
-                      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-100'
+                      : 'text-gray-800 hover:text-gray-900 hover:bg-black/5'
                   }`}
                 >
                   {item.name}
@@ -215,8 +192,8 @@ const RezaNavbar = () => {
                   }}
                   className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-200 ${
                     isScrolled
-                      ? 'hover:underline text-gray-900'
-                      : 'hover:underline text-black'
+                      ? 'hover:bg-gray-100 text-gray-900'
+                      : 'hover:bg-black/5 text-gray-900'
                   }`}
                 >
                   <span className="text-sm font-medium">
@@ -238,7 +215,7 @@ const RezaNavbar = () => {
                       className={`relative w-10 h-10 rounded-full flex items-center justify-center transition-all duration-200 ${
                         isScrolled
                           ? 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                          : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                          : 'bg-white/50 hover:bg-white/80 text-gray-800'
                       }`}
                     >
                       <Bell size={18} strokeWidth={2} />
@@ -355,11 +332,11 @@ const RezaNavbar = () => {
                       onClick={() => setShowUserDropdown(!showUserDropdown)}
                       className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-200 ${
                         isScrolled
-                          ? 'bg-[#171717] hover:bg-gray-800 text-white'
-                          : 'bg-[#171717] hover:bg-gray-800 text-white'
+                          ? 'bg-[#101928] hover:bg-black text-white'
+                          : 'bg-white/80 hover:bg-white text-gray-900 shadow-sm border border-gray-200'
                       }`}
                     >
-                      <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center">
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center ${isScrolled ? 'bg-white/20' : 'bg-gray-100'}`}>
                         <User size={14} strokeWidth={2} />
                       </div>
                       <span className="text-sm font-medium">
@@ -405,11 +382,11 @@ const RezaNavbar = () => {
                     }}
                     className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-200 ${
                       isScrolled
-                        ? 'bg-[#171717] hover:bg-gray-800 text-white'
-                        : 'bg-[#171717] hover:bg-gray-800 text-white'
+                        ? 'bg-[#101928] hover:bg-black text-white shadow-sm'
+                        : 'bg-white/90 hover:bg-white text-gray-900 shadow-sm border border-gray-200'
                     }`}
                   >
-                    <User size={16} strokeWidth={2} />
+                    <User size={16} strokeWidth={2} className={isScrolled ? 'text-white' : 'text-gray-700'} />
                     <span className="text-sm font-medium">
                       Mon Compte
                     </span>
@@ -423,7 +400,7 @@ const RezaNavbar = () => {
                 className={`lg:hidden w-10 h-10 rounded-full flex items-center justify-center transition-all ${
                   isScrolled 
                     ? 'bg-gray-100 hover:bg-gray-200' 
-                    : 'bg-white/10 hover:bg-white/20'
+                    : 'bg-white/50 hover:bg-white/80'
                 }`}
               >
                 {isMobileMenuOpen ? (
@@ -448,7 +425,7 @@ const RezaNavbar = () => {
 
           {/* Menu Panel */}
           <div 
-            className="absolute right-0 top-0 bottom-0 w-full max-w-sm bg-[#f5f7f3]"
+            className="absolute right-0 top-0 bottom-0 w-full max-w-sm bg-white"
             style={{
               animation: 'slideInRight 0.3s ease-out'
             }}
@@ -524,7 +501,7 @@ const RezaNavbar = () => {
                       setIsMobileMenuOpen(false);
                       router.push('/account');
                     }}
-                    className="flex items-center justify-center gap-3 py-4 rounded-full bg-black hover:bg-gray-800 transition-all group"
+                    className="flex items-center justify-center gap-3 py-4 rounded-full bg-[#101928] hover:bg-black transition-all group"
                   >
                     <User size={18} className="text-white" strokeWidth={2} />
                     <span className="text-sm font-semibold text-white">
@@ -568,7 +545,7 @@ const RezaNavbar = () => {
                       window.location.href = "/login";
                     }, 2200);
                   }}
-                  className="flex items-center justify-center gap-3 py-4 rounded-full bg-black hover:bg-gray-800 transition-all group"
+                  className="flex items-center justify-center gap-3 py-4 rounded-full bg-[#101928] hover:bg-black transition-all group"
                 >
                   <User size={18} className="text-white" strokeWidth={2} />
                   <span className="text-sm font-semibold text-white">

@@ -34,7 +34,7 @@ const FAQAccordion = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#f5f7f3] py-20 px-6 -mt-32 lg:-mt-24">
+    <div className="min-h-screen bg-white py-20 px-6 -mt-32 lg:-mt-24">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="text-center mb-16">
@@ -54,7 +54,7 @@ const FAQAccordion = () => {
           {faqs.map((faq, index) => (
             <div
               key={index}
-              className="border-b border-gray-200 bg-[#f5f7f3]"
+              className="border-b border-gray-200 bg-white"
             >
               <button
                 onClick={() => toggleAccordion(index)}

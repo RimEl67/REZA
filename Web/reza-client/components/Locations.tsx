@@ -147,7 +147,7 @@ const Locations = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#f5f7f3]">
+    <div className="min-h-screen bg-white">
       {/* Header */}
       <div className="border-b border-gray-200 mt-0 lg:mt-24">
         <div className="max-w-7xl mx-auto px-6 py-4">

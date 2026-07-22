@@ -10,13 +10,7 @@ import api from '../../lib/api';
 export default function ProOnboardingPage() {
   const router = useRouter();
 
-  // Redirect to pro.reza.ma immediately on mount
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.location.href = 'https://pro.reza.ma';
-    }
-  }, []);
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(0);
   const [userType, setUserType] = useState('');
   const [businessType, setBusinessType] = useState('');
   const [hasCommercialLocal, setHasCommercialLocal] = useState<string | null>(null);
@@ -234,17 +228,12 @@ export default function ProOnboardingPage() {
             }}
             className="flex items-center gap-4 cursor-pointer hover:opacity-80 transition-opacity"
           >
-            <img src="/logos/logo-2.svg?v=rz1" alt="Reza Logo" className="w-10 h-10" />
-            <div className="flex flex-col">
-              <span className="font-thin text-xl tracking-[0.3em] text-gray-900">REZA</span>
-              <div className="flex items-center gap-2">
-                {/* Added line before PRO, matching Header.tsx style */}
-                <span className="w-6 h-[1px] bg-gradient-to-r from-[#C57B57] to-transparent" />
-                <span className="text-[6px] tracking-[0.4em] uppercase text-gray-500">PRO</span>
-              </div>
+            <div className="flex items-center gap-2">
+              <span className="font-extrabold text-[28px] tracking-wide text-gray-900">REZA</span>
+              <span className="text-xs font-bold tracking-[0.2em] text-[#C57B57] mt-1">PRO</span>
             </div>
           </a>
-          {step > 1 && (
+          {step > 0 && (
             <button
               onClick={() => setStep(step - 1)}
               className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
@@ -272,12 +261,134 @@ export default function ProOnboardingPage() {
 
       {/* Main Content */}
       <main className="flex-1 py-12 px-6">
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-5xl mx-auto">
           <AnimatePresence mode="wait">
+
+            {/* Step 0: Pricing Page */}
+            {step === 0 && (
+              <motion.div
+                key="step0"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.4, ease: "easeInOut" }}
+                className="space-y-16"
+              >
+                {/* Hero */}
+                <div className="text-center space-y-5 max-w-3xl mx-auto">
+                  <div className="inline-flex items-center gap-2 px-4 py-2 bg-black/5 rounded-full text-sm font-medium text-gray-700 mb-2">
+                    <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                    Reza Pro · Offre de lancement
+                  </div>
+                  <h1 className="text-5xl md:text-6xl font-extrabold text-gray-900 leading-tight tracking-tight">
+                    Développez votre<br />activité avec Reza
+                  </h1>
+                  <p className="text-xl text-gray-500 font-light leading-relaxed">
+                    La plateforme de réservation beauté et bien-être n°1 au Maroc. Gérez vos rendez-vous, vos équipes et vos clients — tout en un.
+                  </p>
+                </div>
+
+                {/* Pricing Cards */}
+                <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+                  {/* Free Plan */}
+                  <div className="bg-white border-2 border-gray-200 rounded-3xl p-8 space-y-6 hover:border-gray-300 transition-all">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Essai gratuit</p>
+                      <div className="flex items-end gap-2">
+                        <span className="text-5xl font-extrabold text-gray-900">0</span>
+                        <span className="text-2xl font-bold text-gray-400 mb-1">DH</span>
+                        <span className="text-gray-400 mb-1">/mois</span>
+                      </div>
+                      <p className="text-gray-500 text-sm mt-2">Pendant 30 jours, sans carte bancaire</p>
+                    </div>
+
+                    <ul className="space-y-3">
+                      {[
+                        'Jusqu\'à 50 réservations/mois',
+                        'Profil sur l\'application Reza',
+                        'Gestion des rendez-vous',
+                        'Support par email',
+                      ].map(f => (
+                        <li key={f} className="flex items-center gap-3 text-sm text-gray-700">
+                          <Check className="w-4 h-4 text-green-500 flex-shrink-0" />
+                          {f}
+                        </li>
+                      ))}
+                    </ul>
+
+                    <button
+                      onClick={() => setStep(1)}
+                      className="w-full py-4 border-2 border-black rounded-2xl font-bold text-black hover:bg-black hover:text-white transition-all duration-200"
+                    >
+                      Commencer gratuitement
+                    </button>
+                  </div>
+
+                  {/* Pro Plan */}
+                  <div className="bg-black border-2 border-black rounded-3xl p-8 space-y-6 relative overflow-hidden shadow-2xl">
+                    {/* Recommended badge */}
+                    <div className="absolute top-6 right-6 bg-[#C57B57] text-white text-xs font-bold px-3 py-1.5 rounded-full uppercase tracking-wider">
+                      Recommandé
+                    </div>
+
+                    <div>
+                      <p className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Reza Pro</p>
+                      <div className="flex items-end gap-2">
+                        <span className="text-5xl font-extrabold text-white">300</span>
+                        <span className="text-2xl font-bold text-gray-400 mb-1">DH</span>
+                        <span className="text-gray-400 mb-1">/mois</span>
+                      </div>
+                      <p className="text-gray-400 text-sm mt-2">Facturation mensuelle · Résiliable à tout moment</p>
+                    </div>
+
+                    <ul className="space-y-3">
+                      {[
+                        'Réservations illimitées',
+                        'Profil mis en avant dans l\'app',
+                        'Gestion multi-staff & agenda',
+                        'Statistiques & rapports',
+                        'Notifications clients automatiques',
+                        'Support prioritaire 7j/7',
+                      ].map(f => (
+                        <li key={f} className="flex items-center gap-3 text-sm text-gray-200">
+                          <Check className="w-4 h-4 text-[#C57B57] flex-shrink-0" />
+                          {f}
+                        </li>
+                      ))}
+                    </ul>
+
+                    <button
+                      onClick={() => setStep(1)}
+                      className="w-full py-4 bg-white rounded-2xl font-bold text-black hover:bg-gray-100 transition-all duration-200 flex items-center justify-center gap-2"
+                    >
+                      S'inscrire — 300 DH/mois
+                      <ArrowRight className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Trust badges */}
+                <div className="flex flex-wrap items-center justify-center gap-8 max-w-3xl mx-auto pt-4 pb-8 border-t border-gray-200">
+                  {[
+                    { icon: '🔒', text: 'Paiement sécurisé' },
+                    { icon: '📵', text: 'Sans engagement' },
+                    { icon: '🚫', text: 'Zéro commission' },
+                    { icon: '🌟', text: '+500 établissements partenaires' },
+                  ].map(b => (
+                    <div key={b.text} className="flex items-center gap-2 text-sm text-gray-600">
+                      <span>{b.icon}</span>
+                      <span>{b.text}</span>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+
             {/* Step 1: User Type Selection */}
             {step === 1 && (
               <motion.div
                 key="step1"
+
                 initial={{ opacity: 0, x: 40 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -40 }}

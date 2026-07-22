@@ -61,21 +61,14 @@ export default function Footer() {
   }, []);
 
   return (
-    <footer className="w-full bg-[#f5f7f3] text-[#2F2E2C] pt-16 pb-20 px-6 relative overflow-x-hidden z-50">
+    <footer className="w-full bg-white text-[#2F2E2C] pt-16 pb-20 px-6 relative overflow-x-hidden z-50">
       {/* Decorative Elements */}
        <div className="max-w-7xl mx-auto relative z-50">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8 md:gap-12 mb-12 relative z-50">
           {/* Brand Section */}
           <div className="flex flex-col gap-4">
-            <div className="flex items-center gap-3 mb-2">
-              <img src="/logos/logo-2.svg?v=rz1" alt="Reza Logo" className="w-12 h-12 self-start" />
-              <div className="flex flex-col">
-                <span className="font-thin text-2xl tracking-widest">REZA</span>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="w-6 h-px bg-gradient-to-r from-[#C57B57] to-transparent" />
-                  <span className="text-[7px] tracking-[0.5em] uppercase text-[#8B7260] opacity-50">BEAUTY</span>
-                </div>
-              </div>
+            <div className="flex items-center mb-4">
+              <span className="font-extrabold text-[32px] tracking-wide text-[#0a0f2c]">REZA</span>
             </div>
            
             <p className="text-sm text-[#2F2E2C]/70 font-light max-w-xs">

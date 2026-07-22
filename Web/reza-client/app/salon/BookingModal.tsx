@@ -140,6 +140,17 @@ const BookingModal: React.FC<BookingModalProps> = ({
   const [includeBooker, setIncludeBooker] = useState(true);
   const [familyMembers, setFamilyMembers] = useState<FamilyMemberOption[]>([]);
   const [familyLoading, setFamilyLoading] = useState(false);
+  const [cartSubStep, setCartSubStep] = useState<'services' | 'team'>('services');
+  const [selectedTeamMemberId, setSelectedTeamMemberId] = useState<string>('any');
+  
+  const MOCK_TEAM = [
+    { id: 'any', name: 'N\'importe qui', title: 'Disponible pour tout', avatar: null },
+    { id: '1', name: 'Youssef', title: 'Maître Barbier', avatar: 'https://images.unsplash.com/photo-1618077360395-f3068be8e001?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80' },
+    { id: '2', name: 'Amine', title: 'Barbier', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80' },
+    { id: '3', name: 'Karim', title: 'Coiffeur', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80' },
+    { id: '4', name: 'Driss', title: 'Spécialiste Soins', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80' }
+  ];
+
   const [receiptSummary, setReceiptSummary] = useState<{
     participants: { name: string; services: Service[]; subtotal: number }[];
     grandTotal: number;
@@ -698,6 +709,16 @@ const BookingModal: React.FC<BookingModalProps> = ({
       setError('Sélectionnez au moins une personne (Moi ou un proche / invité).');
       return;
     }
+
+    if (bookingStep === 1 && cartSubStep === 'services') {
+      setCartSubStep('team');
+      return;
+    }
+    
+    if (bookingStep === 1 && cartSubStep === 'team') {
+      setBookingStep(2);
+      return;
+    }
     
     // Determine next step based on authentication status and user info
     // Use clientProfileData if available (more up-to-date), otherwise fallback to user from context
@@ -994,7 +1015,7 @@ const BookingModal: React.FC<BookingModalProps> = ({
       `}</style>
 
       {/* Full Page Container */}
-      <div className="fixed inset-0 z-50 bg-[#f5f7f3] overflow-y-auto page-content">
+      <div className="fixed inset-0 z-50 bg-white overflow-y-auto page-content">
         <div className="min-h-screen flex flex-col max-w-4xl mx-auto">
           
           {/* Header */}
@@ -1020,7 +1041,7 @@ const BookingModal: React.FC<BookingModalProps> = ({
                   <div
                     key={step}
                     className={`h-1 rounded-full transition-all duration-500 ${
-                      isActive ? 'w-8 bg-[#8b7260]' : isCompleted ? 'w-8 bg-[#8b7260]' : 'w-8 bg-gray-200'
+                      isActive ? 'w-8 bg-[#101828]' : isCompleted ? 'w-8 bg-[#101828]' : 'w-8 bg-gray-200'
                     }`}
                   />
                 );
@@ -1029,19 +1050,20 @@ const BookingModal: React.FC<BookingModalProps> = ({
 
             <div className="flex items-center">
               <h2 className="text-3xl font-light text-gray-900 tracking-tight">
-                {bookingStep === 1 && 'Votre sélection'}
+                {bookingStep === 1 && cartSubStep === 'services' && 'Votre sélection'}
+                {bookingStep === 1 && cartSubStep === 'team' && 'Choisir un professionnel'}
                 {bookingStep === 2 && 'Choisir un créneau'}
                 {bookingStep === 3 && 'Vos informations'}
                 {bookingStep === 4 && 'Paiement'}
               </h2>
-              {bookingStep === 1 && (
+              {bookingStep === 1 && cartSubStep === 'services' && (
                 <button
                   type="button"
                   onClick={() => setShowAddServiceModal(true)}
                   className="ml-3 p-2 rounded-full hover:bg-gray-100 transition-colors"
                   title="Ajouter des services"
                 >
-                  <Plus className="w-5 h-5 text-[#8b7260]" />
+                  <Plus className="w-5 h-5 text-[#101828]" />
                 </button>
               )}
             </div>
@@ -1056,7 +1078,7 @@ const BookingModal: React.FC<BookingModalProps> = ({
             )}
             
             {/* Step 1: Services Review */}
-            {bookingStep === 1 && (
+            {bookingStep === 1 && cartSubStep === 'services' && (
               <div>
                 <div className="space-y-3 mb-6">
                   {selectedServices.map((service, idx) => (
@@ -1118,6 +1140,41 @@ const BookingModal: React.FC<BookingModalProps> = ({
               </div>
             )}
 
+            {bookingStep === 1 && cartSubStep === 'team' && (
+              <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
+                {MOCK_TEAM.map(member => (
+                  <button
+                    key={member.id}
+                    onClick={() => setSelectedTeamMemberId(member.id)}
+                    className={`w-full p-4 flex items-center gap-4 rounded-2xl border transition-all ${
+                      selectedTeamMemberId === member.id 
+                        ? 'border-[#101828] bg-gray-50' 
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="w-14 h-14 rounded-full bg-gray-100 overflow-hidden flex-shrink-0 flex items-center justify-center border border-gray-200">
+                      {member.avatar ? (
+                        <img src={member.avatar} alt={member.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-xl">👤</span>
+                      )}
+                    </div>
+                    <div className="text-left flex-1">
+                      <h4 className="text-lg font-bold text-gray-900">{member.name}</h4>
+                      <p className="text-sm text-gray-500">{member.title}</p>
+                    </div>
+                    <div className="flex-shrink-0">
+                      <div className={`w-6 h-6 rounded-full border flex items-center justify-center ${
+                        selectedTeamMemberId === member.id ? 'bg-[#101828] border-[#101828]' : 'border-gray-300 bg-white'
+                      }`}>
+                        {selectedTeamMemberId === member.id && <Check className="w-4 h-4 text-white" />}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
             {bookingStep === 2 && (
               <>
                 <div className="flex flex-col md:flex-row gap-10">
@@ -1176,9 +1233,9 @@ const BookingModal: React.FC<BookingModalProps> = ({
                                 disabled={disabled}
                                 className={`aspect-square w-7 h-7 rounded text-xs font-bold transition-all ${
                                   selected
-                                    ? 'bg-[#8b7260] text-white'
+                                    ? 'bg-[#101828] text-white'
                                     : today
-                                    ? 'bg-transparent text-[#8b7260] font-bold'
+                                    ? 'bg-transparent text-[#101828] font-bold'
                                     : disabled
                                     ? 'text-gray-300 cursor-not-allowed '
                                     : 'text-gray-700 hover:bg-gray-100'
@@ -1207,7 +1264,7 @@ const BookingModal: React.FC<BookingModalProps> = ({
                   </div>
                   {slotsLoading && filteredTimeSlots.length === 0 ? (
                     <div className="flex items-center justify-center py-8">
-                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#8b7260]"></div>
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#101828]"></div>
                       <span className="ml-3 text-sm text-gray-500">Chargement des créneaux disponibles...</span>
                     </div>
                   ) : slotsError ? (
@@ -1233,7 +1290,7 @@ const BookingModal: React.FC<BookingModalProps> = ({
                           }}
                           className={`py-2 text-sm font-medium rounded-lg transition-all ${
                             bookingData.time === time
-                              ? 'bg-[#8b7260] text-white'
+                              ? 'bg-[#101828] text-white'
                               : 'bg-transparent border border-gray-200 text-gray-600 hover:bg-gray-100'
                           }`}
                         >
@@ -1265,7 +1322,7 @@ const BookingModal: React.FC<BookingModalProps> = ({
                         setErrors({...errors, firstName: false});
                       }}
                       className={`w-full px-0 py-3 text-lg border-0 border-b-2 focus:outline-none transition-colors text-gray-900 ${
-                        errors.firstName ? 'border-red-300 focus:border-red-500' : 'border-gray-200 focus:border-[#8b7260]'
+                        errors.firstName ? 'border-red-300 focus:border-red-500' : 'border-gray-200 focus:border-[#101828]'
                       } placeholder-gray-400`}
                       placeholder="Votre prénom"
                     />
@@ -1282,7 +1339,7 @@ const BookingModal: React.FC<BookingModalProps> = ({
                         setErrors({...errors, lastName: false});
                       }}
                       className={`w-full px-0 py-3 text-lg border-0 border-b-2 focus:outline-none transition-colors text-gray-900 ${
-                        errors.lastName ? 'border-red-300 focus:border-red-500' : 'border-gray-200 focus:border-[#8b7260]'
+                        errors.lastName ? 'border-red-300 focus:border-red-500' : 'border-gray-200 focus:border-[#101828]'
                       } placeholder-gray-400`}
                       placeholder="Votre nom"
                     />
@@ -1301,7 +1358,7 @@ const BookingModal: React.FC<BookingModalProps> = ({
                         setErrors({...errors, email: false});
                       }}
                       className={`w-full px-0 py-3 text-lg border-0 border-b-2 focus:outline-none transition-colors text-gray-900 ${
-                        errors.email ? 'border-red-300 focus:border-red-500' : 'border-gray-200 focus:border-[#8b7260]'
+                        errors.email ? 'border-red-300 focus:border-red-500' : 'border-gray-200 focus:border-[#101828]'
                       } placeholder-gray-400`}
                       placeholder="votre@email.com"
                     />
@@ -1318,7 +1375,7 @@ const BookingModal: React.FC<BookingModalProps> = ({
                         setErrors({...errors, phone: false});
                       }}
                       className={`w-full px-0 py-3 text-lg border-0 border-b-2 focus:outline-none transition-colors text-gray-900 ${
-                        errors.phone ? 'border-red-300 focus:border-red-500' : 'border-gray-200 focus:border-[#8b7260]'
+                        errors.phone ? 'border-red-300 focus:border-red-500' : 'border-gray-200 focus:border-[#101828]'
                       } placeholder-gray-400`}
                       placeholder="+212 6 00 00 00 00"
                     />
@@ -1331,7 +1388,7 @@ const BookingModal: React.FC<BookingModalProps> = ({
                   <textarea
                     value={bookingData.notes || ''}
                     onChange={(e) => setBookingData({...bookingData, notes: e.target.value})}
-                    className="w-full px-0 py-3 text-lg border-0 border-b-2 border-gray-200 focus:border-[#8b7260] focus:outline-none transition-colors resize-none placeholder-gray-400 text-gray-900"
+                    className="w-full px-0 py-3 text-lg border-0 border-b-2 border-gray-200 focus:border-[#101828] focus:outline-none transition-colors resize-none placeholder-gray-400 text-gray-900"
                     rows={2}
                     placeholder="Informations supplémentaires..."
                   />
@@ -1389,7 +1446,7 @@ const BookingModal: React.FC<BookingModalProps> = ({
                 {/* Pay at Establishment Confirmation */}
                 {bookingData.paymentMethod === 'establishment' && (
                   <div className="space-y-6 animate-in fade-in duration-300">
-                    <div className="bg-[#8b7260] rounded-2xl p-8">
+                    <div className="bg-[#101828] rounded-2xl p-8">
                       <div className="flex items-start gap-4 mb-6">
                         <div className="w-12 h-12 rounded-full bg-white text-black flex items-center justify-center flex-shrink-0">
                           <Check className="w-6 h-6" />
@@ -1402,7 +1459,7 @@ const BookingModal: React.FC<BookingModalProps> = ({
                         </div>
                       </div>
 
-                      <div className="bg-[#f5f7f3] rounded-xl p-6">
+                      <div className="bg-white rounded-xl p-6">
                         <div className="flex items-center justify-between mb-4">
                           <span className="text-sm text-gray-500 uppercase tracking-wider">Numéro de référence</span>
                           <button 
@@ -1411,7 +1468,7 @@ const BookingModal: React.FC<BookingModalProps> = ({
                                 navigator.clipboard.writeText(referenceNumber);
                               }
                             }}
-                            className="text-xs text-[#8b7260] hover:text-[#6d5a4d] font-medium"
+                            className="text-xs text-[#101828] hover:text-[#1d2939] font-medium"
                           >
                             Copier
                           </button>
@@ -1461,7 +1518,7 @@ const BookingModal: React.FC<BookingModalProps> = ({
                                   }
                                 }}
                                 className={`w-full px-3 py-3 pr-14 text-base border-1 rounded-lg focus:outline-none transition-colors text-gray-900 font-mono ${
-                                  errors.cardNumber ? 'border-red-300 focus:border-red-500' : 'border-gray-200 focus:border-[#8b7260]'
+                                  errors.cardNumber ? 'border-red-300 focus:border-red-500' : 'border-gray-200 focus:border-[#101828]'
                                 } placeholder-gray-400`}
                                 placeholder="1234 5678 9012 3456"
                               />
@@ -1500,7 +1557,7 @@ const BookingModal: React.FC<BookingModalProps> = ({
                                 setErrors({...errors, cardName: false});
                               }}
                               className={`w-full px-3 py-3 text-sm border-1 rounded-lg focus:outline-none transition-colors text-gray-900 uppercase ${
-                                errors.cardName ? 'border-red-300 focus:border-red-500' : 'border-gray-200 focus:border-[#8b7260]'
+                                errors.cardName ? 'border-red-300 focus:border-red-500' : 'border-gray-200 focus:border-[#101828]'
                               } placeholder-gray-400`}
                               placeholder="NOM PRÉNOM"
                             />
@@ -1526,7 +1583,7 @@ const BookingModal: React.FC<BookingModalProps> = ({
                                   }
                                 }}
                                 className={`w-full px-3 py-3 text-base border-1 rounded-lg focus:outline-none transition-colors text-gray-900 font-mono ${
-                                  errors.cardExpiry ? 'border-red-300 focus:border-red-500' : 'border-gray-200 focus:border-[#8b7260]'
+                                  errors.cardExpiry ? 'border-red-300 focus:border-red-500' : 'border-gray-200 focus:border-[#101828]'
                                 } placeholder-gray-400`}
                                 placeholder="MM/AA"
                                 maxLength={5}
@@ -1553,7 +1610,7 @@ const BookingModal: React.FC<BookingModalProps> = ({
                                 onFocus={() => setIsCardFlipped(true)}
                                 onBlur={() => setIsCardFlipped(false)}
                                 className={`w-full px-3 py-3 text-base border-1 rounded-lg focus:outline-none transition-colors text-gray-900 font-mono ${
-                                  errors.cardCVV ? 'border-red-300 focus:border-red-500' : 'border-gray-200 focus:border-[#8b7260]'
+                                  errors.cardCVV ? 'border-red-300 focus:border-red-500' : 'border-gray-200 focus:border-[#101828]'
                                 } placeholder-gray-400`}
                                 placeholder="123"
                                 maxLength={3}
@@ -1758,15 +1815,19 @@ const BookingModal: React.FC<BookingModalProps> = ({
           </div>
 
           {/* Footer Actions */}
-          <div className="px-8 md:px-12 py-6 md:py-8 border-t border-gray-100 flex items-center justify-between bg-[#f5f7f3]">
+          <div className="px-8 md:px-12 py-6 md:py-8 border-t border-gray-100 flex items-center justify-between bg-white">
             <div className="text-sm text-gray-500">
               Étape {displayStep} sur {totalSteps}
             </div>
 
             <div className="flex items-center gap-3">
-              {bookingStep > 1 && (
+              {(bookingStep > 1 || (bookingStep === 1 && cartSubStep === 'team')) && (
                 <button
                   onClick={() => {
+                    if (bookingStep === 1 && cartSubStep === 'team') {
+                      setCartSubStep('services');
+                      return;
+                    }
                     // When going back from step 4, skip step 3 if authenticated
                     const shouldSkipStep3 = isAuthenticated && userHasAllInfo;
                     const prevStep = shouldSkipStep3 && bookingStep === 4 ? 2 : bookingStep - 1;
@@ -1785,7 +1846,7 @@ const BookingModal: React.FC<BookingModalProps> = ({
                   (bookingStep === 1 && selectedServices.length === 0) ||
                   (bookingStep === 1 && !includeBooker && groupParticipants.length === 0)
                 }
-                className="px-8 py-3 bg-[#8b7260] text-white rounded-full font-medium hover:bg-[#6d5a4d] transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
+                className="px-8 py-3 bg-[#101828] text-white rounded-full font-medium hover:bg-[#1d2939] transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 {bookingStep === 4 ? 'Confirmer la réservation' : 'Continuer'}
                 {bookingStep < 4 && <ArrowRight className="w-4 h-4" />}
