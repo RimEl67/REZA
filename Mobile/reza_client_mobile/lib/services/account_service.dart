@@ -56,10 +56,10 @@ class AccountService {
     );
   }
 
-  Future<List<Map<String, dynamic>>> getAppointments(String email) async {
+  Future<List<Map<String, dynamic>>> getAppointments(String email, {String sortBy = 'createdAt'}) async {
     final res = await apiClient.get(
       '/public/client/${Uri.encodeComponent(email)}/appointments',
-      query: {'limit': '100'},
+      query: {'limit': '100', 'sortBy': sortBy},
     );
     return List<Map<String, dynamic>>.from((res['appointments'] as List?) ?? []);
   }

@@ -267,7 +267,7 @@ class _RevenueCard extends StatelessWidget {
               Expanded(
                 child: _sub(
                   '${vm.paidCount} transactions',
-                  'EncaissÃ©es',
+                  'Encaissées',
                   Icons.check_circle_outline_rounded,
                 ),
               ),
@@ -450,7 +450,7 @@ class _TransactionsHeader extends StatelessWidget {
             ),
           ),
           Text(
-            '${vm.transactions.length} opÃ©rations',
+            '${vm.transactions.length} opérations',
             style: GoogleFonts.outfit(
               fontSize: 12,
               color: AppColors.textGray,
@@ -482,7 +482,7 @@ class _TransactionItem extends StatelessWidget {
             ? AppColors.pendingBg
             : AppColors.cancelledBg;
     final String statusLabel =
-        isPaid ? 'PayÃ©' : isPending ? 'En attente' : 'AnnulÃ©';
+        isPaid ? 'Payé' : isPending ? 'En attente' : 'Annulé';
 
     final methodIcon = txn['method'] == 'Carte'
         ? Icons.credit_card_rounded

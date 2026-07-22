@@ -180,13 +180,28 @@ class AppointmentCard extends StatelessWidget {
                                     color: AppColors.textDark,
                                   ),
                                 ),
-                                Text(
-                                  appointment.service,
-                                  style: GoogleFonts.outfit(
-                                    fontSize: 12,
-                                    color: AppColors.textGray,
+                                // Show all services or single service
+                                if (appointment.services.length > 1)
+                                  ...appointment.services.map((service) => Padding(
+                                    padding: const EdgeInsets.only(top: 2),
+                                    child: Text(
+                                      service.name,
+                                      style: GoogleFonts.outfit(
+                                        fontSize: 11,
+                                        color: AppColors.textGray,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ))
+                                else
+                                  Text(
+                                    appointment.service,
+                                    style: GoogleFonts.outfit(
+                                      fontSize: 12,
+                                      color: AppColors.textGray,
+                                    ),
                                   ),
-                                ),
                               ],
                             ),
                           ),
@@ -313,7 +328,50 @@ class _AppointmentDetailsSheet extends StatelessWidget {
           ),
           const SizedBox(height: 20),
           _detailRow(Icons.person_rounded, 'Client', appointment.clientName),
-          _detailRow(Icons.spa_rounded, 'Prestation', appointment.service),
+          if (appointment.services.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.spa_rounded, size: 18, color: AppColors.primary),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Services', style: GoogleFonts.outfit(fontSize: 11, color: AppColors.textLight, fontWeight: FontWeight.w500)),
+                            ...appointment.services.map((service) => Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '• ${service.name} • ${service.duration} min • ${service.price.toStringAsFixed(0)} MAD',
+                                      style: GoogleFonts.outfit(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textDark),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )),
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text('Total: ${appointment.totalDuration} min • ${appointment.totalPrice.toStringAsFixed(0)} MAD', style: GoogleFonts.outfit(fontSize: 13, color: AppColors.textGray, fontWeight: FontWeight.w600)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            )
+          else
+            _detailRow(Icons.spa_rounded, 'Prestation', appointment.service),
           _detailRow(Icons.access_time_rounded, 'Heure', '${appointment.time} (${appointment.duration} min)'),
           _detailRow(Icons.badge_rounded, 'Collaborateur', appointment.employee),
           if (appointment.phone != null)

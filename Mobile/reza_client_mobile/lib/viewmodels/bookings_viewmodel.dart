@@ -7,24 +7,57 @@ class BookingsViewModel extends ChangeNotifier {
   List<Map<String, dynamic>> past = [];
   bool loading = false;
   String? error;
+  String sortBy = 'createdAt'; // 'createdAt' or 'startTime'
 
   Map<String, dynamic> mapAppointment(Map<String, dynamic> a) {
-    final start = DateTime.tryParse(a['startTime']?.toString() ?? '')?.toLocal();
-    final service = a['service'] as Map<String, dynamic>?;
-    final tenant = a['tenant'] as Map<String, dynamic>?;
-    final status = (a['status']?.toString() ?? 'PENDING').toLowerCase();
+    // The backend pre-formats everything as flat fields.
+    // 'service' and 'salon' are plain Strings, price is a number,
+    // duration and image are already formatted strings.
+
+    final status = (a['status']?.toString() ?? 'pending').toLowerCase();
+
+    // price comes as a number (e.g. 150) → format it
+    final priceRaw = a['price'];
+    String priceDisplay = '';
+    if (priceRaw != null && priceRaw != 0) {
+      final priceNum = priceRaw is num ? priceRaw : num.tryParse(priceRaw.toString());
+      if (priceNum != null && priceNum > 0) {
+        priceDisplay = '${priceNum.toStringAsFixed(0)} MAD';
+      }
+    }
+
+    // Extract services array from backend response
+    final servicesRaw = a['services'] as List<dynamic>? ?? [];
+    final services = servicesRaw.map((s) {
+      if (s is Map<String, dynamic>) {
+        return {
+          'id': s['id']?.toString() ?? '',
+          'serviceId': s['serviceId']?.toString() ?? '',
+          'name': s['name']?.toString() ?? '',
+          'duration': s['duration'] ?? 0,
+          'price': s['price'] ?? 0,
+        };
+      }
+      return <String, dynamic>{};
+    }).toList();
+
+    // date + time are already formatted by the backend ("DD/MM/YYYY", "HH:MM")
+    // but we also parse startTime for sorting (_dt)
+    final dt = DateTime.tryParse(a['startTime']?.toString() ?? '')?.toLocal();
+
     return {
       'id': a['id']?.toString() ?? '',
-      'service': service?['name']?.toString() ?? 'Service',
-      'salon': tenant?['name']?.toString() ?? 'Salon',
+      'venue': a['salon']?.toString() ?? 'Salon',
+      'service': a['service']?.toString() ?? 'Service',
+      'salon': a['salon']?.toString() ?? 'Salon',
+      'image': a['image']?.toString() ?? '',
+      'price': priceDisplay,
+      'duration': a['duration']?.toString() ?? '',
       'status': status,
-      'date': start != null
-          ? '${start.day.toString().padLeft(2, '0')}/${start.month.toString().padLeft(2, '0')}/${start.year}'
-          : '',
-      'time': start != null
-          ? '${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}'
-          : '',
-      '_dt': start,
+      'date': a['date']?.toString() ?? '',
+      'time': a['time']?.toString() ?? '',
+      'services': services, // Pass through the services array
+      '_dt': dt,
       'raw': a,
     };
   }
@@ -42,7 +75,7 @@ class BookingsViewModel extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      final list = await accountService.getAppointments(email);
+      final list = await accountService.getAppointments(email, sortBy: sortBy);
       final now = DateTime.now();
       final up = <Map<String, dynamic>>[];
       final pa = <Map<String, dynamic>>[];
@@ -73,6 +106,11 @@ class BookingsViewModel extends ChangeNotifier {
       loading = false;
       notifyListeners();
     }
+  }
+
+  void setSortBy(String sort) {
+    sortBy = sort;
+    notifyListeners();
   }
 
   Future<void> cancel(String appointmentId, String email) async {

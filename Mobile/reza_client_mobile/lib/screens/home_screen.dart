@@ -60,7 +60,12 @@ class _HomeScreenState extends State<_HomeScreenBody> {
   void _openVenue(VenueItem venue) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => VenueDetailScreen(tenantId: venue.id)),
+      MaterialPageRoute(
+        builder: (_) => VenueDetailScreen(
+          tenantId: venue.id,
+          onGoToBookings: () => setState(() => _navIndex = 2),
+        ),
+      ),
     );
   }
 
@@ -130,8 +135,8 @@ class _HomeScreenState extends State<_HomeScreenBody> {
         index: _navIndex,
         children: [
           _buildHomeBody(),
-          const SearchResultsScreen(),
-          const BookingsScreen(),
+          SearchResultsScreen(onGoToBookings: () => setState(() => _navIndex = 2)),
+          BookingsScreen(),
           ProchesScreen(onExplore: () => setState(() => _navIndex = 1)),
           const ProfileScreen(),
         ],
@@ -151,8 +156,19 @@ class _HomeScreenState extends State<_HomeScreenBody> {
         ? [list.last, list[list.length > 1 ? 1 : 0]]
         : list;
 
-    return CustomScrollView(
-      slivers: [
+    return RefreshIndicator(
+      onRefresh: () async {
+        final vm = context.read<HomeViewModel>();
+        if (vm.hasUserLocation) {
+          await vm.requestUserLocation();
+        } else {
+          await vm.loadTenants();
+        }
+      },
+      color: AppColors.primary,
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
         SliverToBoxAdapter(
           child: SafeArea(
             bottom: false,
@@ -171,16 +187,23 @@ class _HomeScreenState extends State<_HomeScreenBody> {
           child: Stack(
             clipBehavior: Clip.none,
             children: [
-              Container(
+              SizedBox(
                 height: 280,
                 width: double.infinity,
-                decoration: const BoxDecoration(
-                  image: DecorationImage(
-                    image: NetworkImage('https://images.unsplash.com/photo-1560066984-138dadb4c035?q=80&w=800&auto=format&fit=crop'),
-                    fit: BoxFit.cover,
-                  ),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.network(
+                      'https://images.unsplash.com/photo-1560066984-138dadb4c035?q=80&w=800&auto=format&fit=crop',
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => Container(
+                        color: Colors.grey[800],
+                        child: const Icon(Icons.image_not_supported, color: Colors.white30, size: 50),
+                      ),
+                    ),
+                    Container(color: Colors.black.withValues(alpha: 0.3)),
+                  ],
                 ),
-                child: Container(color: Colors.black.withValues(alpha: 0.3)),
               ),
               Positioned(
                 bottom: -40,
@@ -429,8 +452,9 @@ class _HomeScreenState extends State<_HomeScreenBody> {
           ),
         ),
       ],
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildSectionHeader(String title, String action) {
     return Padding(
@@ -655,13 +679,43 @@ class _HomeScreenState extends State<_HomeScreenBody> {
       ),
       child: Row(
         children: [
-          CircleAvatar(
-            radius: 30,
-            backgroundColor: AppColors.primary.withValues(alpha: 0.1),
-            backgroundImage: prof.avatarUrl.startsWith('http') ? NetworkImage(prof.avatarUrl) : null,
-            child: prof.avatarUrl.startsWith('http')
-                ? null
-                : Text(prof.avatarUrl, style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.primary)),
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: ClipOval(
+              child: prof.avatarUrl.startsWith('http')
+                  ? Image.network(
+                      prof.avatarUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        final fallbackText = prof.name.trim().isNotEmpty ? prof.name.trim()[0].toUpperCase() : '?';
+                        return Center(
+                          child: Text(
+                            fallbackText,
+                            style: GoogleFonts.inter(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                        );
+                      },
+                    )
+                  : Center(
+                      child: Text(
+                        prof.avatarUrl,
+                        style: GoogleFonts.inter(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                    ),
+            ),
           ),
           const SizedBox(width: 16),
           Expanded(

@@ -599,14 +599,26 @@ class _AgendaBody extends StatelessWidget {
                                       overflow: TextOverflow.ellipsis,
                                       maxLines: 2,
                                     ),
-                                    Text(
-                                      app.service,
-                                      style: GoogleFonts.outfit(
-                                        color: Colors.white.withOpacity(0.9),
-                                        fontSize: 10,
+                                    // Show all services or single service
+                                    if (app.services.length > 1)
+                                      ...app.services.map((service) => Text(
+                                        service.name,
+                                        style: GoogleFonts.outfit(
+                                          color: Colors.white.withOpacity(0.9),
+                                          fontSize: 10,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                        maxLines: 1,
+                                      ))
+                                    else
+                                      Text(
+                                        app.service,
+                                        style: GoogleFonts.outfit(
+                                          color: Colors.white.withOpacity(0.9),
+                                          fontSize: 10,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
                                       ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
                                   ],
                                 ),
                               ),
@@ -652,7 +664,26 @@ class _DetailsSheet extends StatelessWidget {
           const SizedBox(height: 16),
           Text(appointment.clientName,
               style: GoogleFonts.outfit(fontWeight: FontWeight.w600)),
-          Text(appointment.service),
+          const SizedBox(height: 8),
+          if (appointment.services.isNotEmpty) ...[
+            Text('Services (${appointment.services.length})',
+                style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textLight)),
+            const SizedBox(height: 4),
+            ...appointment.services.map((s) => Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                '• ${s.name} • ${s.duration} min • ${s.price.toStringAsFixed(0)} MAD',
+                style: GoogleFonts.outfit(fontSize: 13, color: AppColors.textGray),
+              ),
+            )),
+            const SizedBox(height: 4),
+            Text(
+              'Total: ${appointment.totalDuration} min • ${appointment.totalPrice.toStringAsFixed(0)} MAD',
+              style: GoogleFonts.outfit(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textDark),
+            ),
+          ] else
+            Text(appointment.service),
+          const SizedBox(height: 8),
           Text('${appointment.time} · ${appointment.duration} min'),
           Text(appointment.employee),
           const SizedBox(height: 8),
@@ -805,9 +836,11 @@ class _FinalizeCaisseDialogState extends State<_FinalizeCaisseDialog> {
   @override
   Widget build(BuildContext context) {
     final apt = widget.appointment;
-    final priceLabel = apt.servicePrice != null && apt.servicePrice! > 0
-        ? ' · ${apt.servicePrice!.toStringAsFixed(0)} DH'
-        : '';
+    final servicesDisplay = apt.services.length > 1
+        ? '${apt.services.length} services • ${apt.totalDuration} min • ${apt.totalPrice.toStringAsFixed(0)} DH'
+        : apt.services.isNotEmpty
+            ? '${apt.services[0].name} • ${apt.totalPrice.toStringAsFixed(0)} DH'
+            : '${apt.service} • ${(apt.servicePrice ?? 0).toStringAsFixed(0)} DH';
 
     return AlertDialog(
       backgroundColor: Colors.white,
@@ -826,7 +859,7 @@ class _FinalizeCaisseDialogState extends State<_FinalizeCaisseDialog> {
           ),
           const SizedBox(height: 8),
           Text(
-            '${apt.clientName} · ${apt.service}$priceLabel',
+            '${apt.clientName} · $servicesDisplay',
             style: GoogleFonts.outfit(fontSize: 12, color: AppColors.textLight),
           ),
           const SizedBox(height: 16),
