@@ -1,4 +1,6 @@
 import 'api_client.dart';
+import '../mock_data.dart';
+import 'session_store.dart';
 
 class InvoiceService {
   Future<List<Map<String, dynamic>>> list({
@@ -8,6 +10,17 @@ class InvoiceService {
     int page = 1,
     int limit = 50,
   }) async {
+    if (useMockData) {
+      final sessionUser = await sessionStore.getUser();
+      var data = getMockInvoices(sessionUser?.tenantId);
+
+      if (status != null && status.isNotEmpty) {
+        data = data.where((inv) => inv['status'] == status).toList();
+      }
+
+      return data;
+    }
+
     final res = await apiClient.get('/invoices', query: {
       if (startDate != null) 'startDate': startDate,
       if (endDate != null) 'endDate': endDate,
@@ -19,6 +32,17 @@ class InvoiceService {
   }
 
   Future<Map<String, dynamic>> stats({String? startDate, String? endDate}) async {
+    if (useMockData) {
+      final sessionUser = await sessionStore.getUser();
+      final invoices = getMockInvoices(sessionUser?.tenantId);
+      final totalRevenue = invoices
+          .where((inv) => inv['status'] == 'PAID')
+          .fold(0.0, (sum, inv) => sum + (inv['total'] as double));
+      return {
+        'totalRevenue': totalRevenue,
+      };
+    }
+
     try {
       return await apiClient.get('/invoices/stats', query: {
         if (startDate != null) 'startDate': startDate,
@@ -29,7 +53,7 @@ class InvoiceService {
     }
   }
 
-  /// Flow A — encaisser une vente (PAID invoice + line items)
+  // Flow A — encaisser une vente (PAID invoice + line items)
   Future<Map<String, dynamic>> createSale({
     required String clientId,
     required List<Map<String, dynamic>> items,
@@ -40,6 +64,22 @@ class InvoiceService {
     String? tenantId,
     String? appointmentId,
   }) async {
+    if (useMockData) {
+      return {
+        'id': generateId(),
+        'invoiceNumber': 'INV-MOCK-${DateTime.now().millisecondsSinceEpoch}',
+        'clientId': clientId,
+        'items': items,
+        'paymentMethod': paymentMethod,
+        'amount': amount,
+        'tax': tax,
+        'total': amount,
+        'status': 'PAID',
+        'paidAt': DateTime.now().toIso8601String(),
+        'createdAt': DateTime.now().toIso8601String(),
+      };
+    }
+
     final body = <String, dynamic>{
       'clientId': clientId,
       'items': items,

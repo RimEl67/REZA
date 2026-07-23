@@ -5,11 +5,13 @@ class SalonSummary {
   final String id;
   final String name;
   final String? city;
+  final String? imageUrl;
 
   const SalonSummary({
     required this.id,
     required this.name,
     this.city,
+    this.imageUrl,
   });
 
   factory SalonSummary.fromJson(Map<String, dynamic> json) {
@@ -17,6 +19,7 @@ class SalonSummary {
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? 'Salon',
       city: json['city']?.toString(),
+      imageUrl: json['imageUrl']?.toString(),
     );
   }
 
@@ -24,6 +27,7 @@ class SalonSummary {
         'id': id,
         'name': name,
         if (city != null) 'city': city,
+        if (imageUrl != null) 'imageUrl': imageUrl,
       };
 }
 
