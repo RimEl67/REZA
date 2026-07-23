@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from 'react';
-import { MapPin, Star, ArrowLeft, Heart, Gift, Phone, Mail, X, ChevronLeft, ChevronRight, Check, User, Clock, Calendar, Globe, Instagram, Facebook, Twitter, Linkedin, Map } from 'lucide-react';
+import { MapPin, Star, ArrowLeft, Heart, Gift, Phone, Mail, X, ChevronLeft, ChevronRight, Check, User, Users, Clock, Calendar, Globe, Instagram, Facebook, Twitter, Linkedin, Map } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import RezaNavbar from '../../../components/Header';
 import Footer from '../../../components/Footer';
@@ -748,7 +748,7 @@ export default function SalonDetail() {
 
             {/* Right Column Sticky Card (Fresha Venue Card Style) */}
             <div className="lg:col-span-1 self-start">
-              <div className="lg:sticky lg:top-36 space-y-6">
+              <div className="space-y-6">
                 
                 {/* Main Salon Venue Card */}
                 <div className="bg-white border border-gray-200 rounded-3xl p-8 shadow-sm space-y-6">
@@ -1013,8 +1013,11 @@ export default function SalonDetail() {
               <button
                 onClick={() => {
                   setShowBookingOptionModal(false);
-                  const prestationsEl = document.getElementById('prestations');
-                  if (prestationsEl) prestationsEl.scrollIntoView({ behavior: 'smooth' });
+                  if (selectedServices.length === 0 && salonData?.services?.[0]?.items?.[0]) {
+                    setSelectedServices([salonData.services[0].items[0]]);
+                  }
+                  setBookingStep(1);
+                  setShowBookingModal(true);
                 }}
                 className="w-full p-5 bg-white hover:bg-gray-50 border border-gray-200 rounded-2xl flex items-center justify-between transition-all group text-left shadow-sm"
               >
@@ -1044,7 +1047,7 @@ export default function SalonDetail() {
                   <p className="text-sm text-gray-500">Pour vous-même et pour les autres</p>
                 </div>
                 <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center group-hover:bg-gray-200 transition-colors">
-                  <span className="text-lg">👨‍👩‍👧</span>
+                  <Users className="w-5 h-5 text-gray-700" />
                 </div>
               </button>
             </div>
@@ -1085,6 +1088,7 @@ export default function SalonDetail() {
         }}
         salonServices={salonData.services}
         salonId={salon?.id}
+        employees={employees}
         slotsLoading={slotsLoading}
         slotsError={slotsError}
         lastUpdated={lastUpdated}

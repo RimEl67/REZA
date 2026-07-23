@@ -1,8 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
-import { Calendar, Clock, User, Phone, Mail, X, ChevronLeft, ChevronRight, MoreVertical, Plus, CalendarIcon, MapPin, Upload, Image as ImageIcon, Check, UserX, Flag } from 'lucide-react';
+import { Calendar, Clock, User, Phone, Mail, X, ChevronLeft, ChevronRight, MoreVertical, Plus, CalendarIcon, MapPin, Image as ImageIcon, Check, UserX, Flag, AlertTriangle, XCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -20,7 +19,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import DatePickerDemo from '@/components/ui/datepicker';
@@ -50,6 +48,7 @@ type ApiAppointment = {
     duration: number;
     price: number;
     sortOrder: number;
+    employee?: { id: string; firstName: string; lastName: string } | null;
   }>;
   totalDuration?: number;
   totalPrice?: number;
@@ -87,6 +86,7 @@ type Appointment = {
     duration: number;
     price: number;
     sortOrder: number;
+    employee?: { id: string; firstName: string; lastName: string } | null;
   }>;
   time: string;
   duration: number;
@@ -108,6 +108,8 @@ type Appointment = {
   servicePrice?: number | null;
   totalDuration?: number;
   totalPrice?: number;
+  /** Per-service employee assignments for creation */
+  servicesPayload?: Array<{ serviceId: string; employeeId: string | null }>;
 };
 
 type FinalizePaymentMethod = 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK';
@@ -180,6 +182,7 @@ const transformApiAppointment = (apiApt: ApiAppointment): Appointment => {
     duration: service.duration,
     price: service.price,
     sortOrder: service.sortOrder,
+    employee: service.employee ?? null,
   }));
 
   return {
@@ -243,26 +246,34 @@ const transformToApiAppointment = (apt: Appointment, date: Date, time: string): 
     'no_show': 'NO_SHOW'
   };
   
-  const serviceIds = (apt.serviceIds && apt.serviceIds.length > 0
-    ? apt.serviceIds
-    : apt.serviceId
-      ? [apt.serviceId]
-      : []);
-
-  return {
+  const body: Record<string, unknown> = {
     clientId: apt.clientId!,
-    ...(serviceIds.length > 0 ? { serviceIds } : {}),
-    ...(apt.serviceId ? { serviceId: apt.serviceId } : {}),
-    employeeId: apt.employeeId || undefined,
+    source: 'ADMIN',
     startTime: startTimeISO,
-    duration: apt.duration,
     notes: apt.notes || undefined,
     status: statusMap[apt.status] || 'CONFIRMED',
     ...(apt.tenantId ? { tenantId: apt.tenantId } : {}),
   };
-};
 
-const ACTIVE_APPOINTMENT_STATUSES = new Set(['pending', 'confirmed', 'in_progress']);
+  if (apt.servicesPayload && apt.servicesPayload.length > 0) {
+    body.services = apt.servicesPayload.map((s) => ({
+      serviceId: s.serviceId,
+      ...(s.employeeId ? { employeeId: s.employeeId } : {}),
+    }));
+  } else {
+    const serviceIds = (apt.serviceIds && apt.serviceIds.length > 0
+      ? apt.serviceIds
+      : apt.serviceId
+        ? [apt.serviceId]
+        : []);
+    if (serviceIds.length > 0) body.serviceIds = serviceIds;
+    if (apt.serviceId) body.serviceId = apt.serviceId;
+    body.employeeId = apt.employeeId || undefined;
+    body.duration = apt.duration;
+  }
+
+  return body;
+};
 
 const canConfirmStatus = (status: string) => status === 'pending';
 const canMarkAbsentOrDone = (status: string) =>
@@ -275,57 +286,60 @@ const PAYMENT_METHOD_LABELS: Record<FinalizePaymentMethod, string> = {
   CHECK: 'Chèque',
 };
 
-const getAppointmentWindow = (date: Date, time: string, duration: number) => {
-  const [hours, minutes] = time.split(':').map(Number);
-  const start = new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-    hours,
-    minutes,
-    0,
-    0
-  );
-  const end = new Date(start.getTime() + duration * 60000);
-  return { start, end };
+// Extract unique employee display info from appointment (per-service or top-level)
+const getAppointmentEmployeeLabel = (apt: Appointment): string => {
+  const names = new Set<string>();
+  if (apt.services && apt.services.length > 0) {
+    for (const s of apt.services) {
+      if (s.employee) names.add(`${s.employee.firstName} ${s.employee.lastName}`);
+    }
+  }
+  if (names.size === 0 && apt.employee && apt.employee !== 'Non assigné') names.add(apt.employee);
+  if (names.size === 0) return 'Non assigné';
+  const sorted = [...names].sort();
+  if (sorted.length === 1) return sorted[0];
+  return `${sorted[0]} +${sorted.length - 1}`;
 };
 
-const findLocalScheduleConflict = (
-  appointments: Appointment[],
-  candidate: {
-    employeeId?: string | null;
-    date: Date;
-    time: string;
-    duration: number;
-    status: string;
-    excludeId?: string;
+// Get the primary employee name for color lookups (uses first service's employee)
+const getPrimaryEmployeeName = (apt: Appointment): string | undefined => {
+  if (apt.services && apt.services.length > 0) {
+    const emp = apt.services[0]?.employee;
+    if (emp) return `${emp.firstName} ${emp.lastName}`;
   }
-): Appointment | null => {
-  if (!candidate.employeeId || !ACTIVE_APPOINTMENT_STATUSES.has(candidate.status)) {
-    return null;
+  return apt.employee || undefined;
+};
+
+// Check if an appointment involves a given employee name
+const appointmentHasEmployee = (apt: Appointment, employeeName: string): boolean => {
+  const target = employeeName.trim().toLowerCase();
+  if (apt.services && apt.services.length > 0) {
+    for (const s of apt.services) {
+      if (s.employee) {
+        const name = `${s.employee.firstName} ${s.employee.lastName}`.trim().toLowerCase();
+        if (name === target) return true;
+      }
+    }
   }
-
-  const { start, end } = getAppointmentWindow(candidate.date, candidate.time, candidate.duration);
-
-  return (
-    appointments.find((apt) => {
-      if (candidate.excludeId && apt.id === candidate.excludeId) return false;
-      if (!apt.employeeId || apt.employeeId !== candidate.employeeId) return false;
-      if (!ACTIVE_APPOINTMENT_STATUSES.has(apt.status)) return false;
-      const aptWindow = getAppointmentWindow(apt.date, apt.time, apt.duration);
-      return start < aptWindow.end && end > aptWindow.start;
-    }) ?? null
-  );
+  if (apt.employee) {
+    return apt.employee.trim().toLowerCase() === target;
+  }
+  return false;
 };
 
 const getApiErrorMessage = (err: unknown, fallback: string) => {
+  if (err && typeof err === 'object') {
+    const e = err as any;
+    if (e.details?.message) return e.details.message;
+    if (e.message) return e.message;
+  }
   if (err instanceof Error && err.message) return err.message;
   return fallback;
 };
 
 interface NewAppointmentModalProps {
   onClose: () => void;
-  onCreateAppointment: (appointment: Appointment) => void;
+  onCreateAppointment: (appointment: Appointment) => Promise<void>;
   employeesData?: Array<{
     id: string;
     name: string;
@@ -337,31 +351,80 @@ interface NewAppointmentModalProps {
   initialTime?: string;
 }
 
+// Plan types matching backend scheduling.service.ts
+type PlanEmployeeAvailability = {
+  employeeId: string;
+  employeeName: string;
+  available: boolean;
+  recommended: boolean;
+  reason?: string;
+};
+
+type PlanServiceAssignment = {
+  serviceId: string;
+  serviceName: string;
+  duration: number;
+  employeeId: string | null;
+  employeeName: string;
+};
+
+type PlanAlert = {
+  severity: 'warning' | 'conflict';
+  type: string;
+  message: string;
+};
+
+type PlanResult = {
+  estimatedEndTime: string;
+  recommendedAssignment: PlanServiceAssignment[];
+  services: Array<{
+    serviceId: string;
+    serviceName: string;
+    duration: number;
+    employees: PlanEmployeeAvailability[];
+  }>;
+  alerts: PlanAlert[];
+  clientAlerts: Record<string, PlanAlert[]>;
+};
+
+const PLAN_DEBOUNCE_MS = 300;
+const ERROR_AUTO_DISMISS_MS = 3000;
+const CREATE_ERROR_AUTO_DISMISS_MS = 8000;
+
 const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCreateAppointment, employeesData = [], initialDate, initialTime }) => {
   const { isAuthenticated, salons, isSalonFilterMulti, effectiveSalonIds } = useAuth();
-  const router = useRouter();
   const [createTenantId, setCreateTenantId] = useState(() =>
     !isSalonFilterMulti && effectiveSalonIds.length === 1 ? effectiveSalonIds[0] : ''
   );
   const [date, setDate] = useState<Date | undefined>(initialDate);
   const [time, setTime] = useState(initialTime || '');
-  const [service, setService] = useState('');
-  const [serviceId, setServiceId] = useState('');
   const [serviceIds, setServiceIds] = useState<string[]>([]);
-  const [duration, setDuration] = useState('');
-  const [employee, setEmployee] = useState('');
-  const [employeeId, setEmployeeId] = useState('');
   const [notes, setNotes] = useState('');
   const [clients, setClients] = useState<Client[]>([]);
   const [services, setServices] = useState<Array<{id: string, name: string, duration: number}>>([]);
   const [employees, setEmployees] = useState<Array<{id: string, name: string}>>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
-  const [clientSearch, setClientSearch] = useState('');
-  const [isNewClient, setIsNewClient] = useState(false);
-  const [newClientPhone, setNewClientPhone] = useState('');
-  const [newClientEmail, setNewClientEmail] = useState('');
+
+
   const [loading, setLoading] = useState(false);
-  
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  // Client alerts (populated by diagnostics endpoint on date/time change)
+  const [clientAlerts, setClientAlerts] = useState<Record<string, PlanAlert[]>>({});
+
+  // Plan state
+  const [plan, setPlan] = useState<PlanResult | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const planRequestId = useRef(0);
+  // Manually overridden assignments: serviceId -> employeeId
+  const [overrides, setOverrides] = useState<Record<string, string>>({});
+
+  // Total duration computed from selected services
+  const totalDuration = serviceIds.reduce((sum, id) => {
+    const s = services.find((sv) => sv.id === id);
+    return sum + (s?.duration || 0);
+  }, 0);
+
   // Fetch clients, services, and employees from API (scoped to create salon when multi)
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -413,170 +476,152 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
     fetchData();
   }, [isAuthenticated, createTenantId, isSalonFilterMulti]);
 
-  const filteredClients = clients.filter(client =>
-    client.name.toLowerCase().includes(clientSearch.toLowerCase()) ||
-    (client.email && client.email.toLowerCase().includes(clientSearch.toLowerCase())) ||
-    (client.phone && client.phone.includes(clientSearch))
-  );
+  // Fetch client diagnostics when only date/time change (no services needed yet)
+  useEffect(() => {
+    if (!date || !time) { setClientAlerts({}); return; }
+    if (serviceIds.length > 0) return;
+
+    const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    let normalizedTime = time;
+    if (/^\d{1,2}:\d{2}:\d{2}$/.test(time)) normalizedTime = time.slice(0, 5);
+    else if (/^\d{1,2}$/.test(time)) normalizedTime = time.padStart(2, '0') + ':00';
+
+    const timer = setTimeout(async () => {
+      try {
+        const result = await api.clientDiagnostics({ date: dateStr, startTime: normalizedTime });
+        setClientAlerts(result.clientAlerts as Record<string, PlanAlert[]>);
+      } catch (err) {
+        console.error('Error fetching client diagnostics:', err);
+      }
+    }, PLAN_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [date, time, serviceIds.length > 0]);
+
+  // Fetch plan when services, date, time, client, or overrides change (debounced)
+  useEffect(() => {
+    if (!date || !time || serviceIds.length === 0) {
+      setPlan(null);
+      setOverrides({});
+      return;
+    }
+
+    const currentId = ++planRequestId.current;
+    const timer = setTimeout(async () => {
+      setPlanLoading(true);
+      try {
+        const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        let normalizedTime = time;
+        if (/^\d{1,2}:\d{2}:\d{2}$/.test(time)) normalizedTime = time.slice(0, 5);
+        else if (/^\d{1,2}$/.test(time)) normalizedTime = time.padStart(2, '0') + ':00';
+
+        const selectedServiceObjects = services.filter((s) => serviceIds.includes(s.id));
+        const hasOverrides = Object.keys(overrides).length > 0;
+        let assignments: { serviceId: string; employeeId: string | null }[] | undefined;
+        if (hasOverrides && plan) {
+          assignments = selectedServiceObjects.map((s) => ({
+            serviceId: s.id,
+            employeeId: overrides[s.id] || plan.recommendedAssignment.find((a) => a.serviceId === s.id)?.employeeId || null,
+          }));
+        }
+
+        const result = await api.planAppointment({
+          serviceIds,
+          date: dateStr,
+          startTime: normalizedTime,
+          clientId: selectedClient?.id,
+          assignments,
+        });
+        if (currentId !== planRequestId.current) return;
+        setPlan(result);
+        setClientAlerts(result.clientAlerts || {});
+      } catch (err) {
+        if (currentId !== planRequestId.current) return;
+        console.error('Error fetching plan:', err);
+        setPlan(null);
+      } finally {
+        if (currentId === planRequestId.current) setPlanLoading(false);
+      }
+    }, PLAN_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [date, time, serviceIds, selectedClient?.id, JSON.stringify(overrides)]);
 
   const handleClientSelect = (client: Client) => {
     setSelectedClient(client);
-    setClientSearch(client.name);
-    setIsNewClient(false);
   };
 
-  const handleClientSearchChange = (value: string) => {
-    setClientSearch(value);
-    setSelectedClient(null);
-    
-    // Calculate filtered clients with the new value (not the old state)
-    const filtered = clients.filter(client =>
-      client.name.toLowerCase().includes(value.toLowerCase()) ||
-      (client.email && client.email.toLowerCase().includes(value.toLowerCase())) ||
-      (client.phone && client.phone.includes(value))
-    );
-    
-    setIsNewClient(value.length > 0 && filtered.length === 0);
-  };
-
-  const [createError, setCreateError] = useState<string | null>(null);
-
-  const handleCreate = () => {
-    // Validation
+  const handleCreate = async () => {
     if (isSalonFilterMulti && !createTenantId) {
       setCreateError('Veuillez sélectionner un salon');
-      setTimeout(() => setCreateError(null), 3000);
+      setTimeout(() => setCreateError(null), ERROR_AUTO_DISMISS_MS);
       return;
     }
-    if (!date || !time || serviceIds.length === 0 || !duration || !selectedClient) {
+    if (!date || !time || serviceIds.length === 0 || !selectedClient) {
       setCreateError('Veuillez remplir tous les champs obligatoires');
-      setTimeout(() => setCreateError(null), 3000);
+      setTimeout(() => setCreateError(null), ERROR_AUTO_DISMISS_MS);
       return;
     }
     setCreateError(null);
 
-    // Normalize the date to remove time component
     const normalizedDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
     normalizedDate.setHours(0, 0, 0, 0);
 
-    // Normalize time to HH:mm format
     let normalizedTime = time;
-    if (/^\d{1,2}:\d{2}:\d{2}$/.test(time)) {
-      normalizedTime = time.slice(0,5);
-    } else if (/^\d{1,2}$/.test(time)) {
-      normalizedTime = time.padStart(2, '0') + ':00';
-    }
+    if (/^\d{1,2}:\d{2}:\d{2}$/.test(time)) normalizedTime = time.slice(0, 5);
+    else if (/^\d{1,2}$/.test(time)) normalizedTime = time.padStart(2, '0') + ':00';
 
-    // Get selected services
     const selectedServiceObjects = services.filter(s => serviceIds.includes(s.id));
-    const serviceName = selectedServiceObjects.length > 0
-      ? selectedServiceObjects.map((s) => s.name).join(', ')
-      : service;
+    const serviceName = selectedServiceObjects.map((s) => s.name).join(', ');
 
-    // Get employee name
-    const selectedEmployee = employees.find(e => e.id === employeeId);
-    const employeeName = selectedEmployee?.name || employee;
+    // Build services array with per-service employee assignments
+    const servicesPayload = selectedServiceObjects.map((s) => ({
+      serviceId: s.id,
+      employeeId: overrides[s.id] || plan?.recommendedAssignment.find((a) => a.serviceId === s.id)?.employeeId || null,
+    }));
 
-    // Create new appointment
+    const firstEmployeeId = servicesPayload[0]?.employeeId || null;
+    const firstEmployeeName = firstEmployeeId
+      ? employees.find((e) => e.id === firstEmployeeId)?.name || 'Non assigné'
+      : 'Non assigné';
+
     const newAppointment: Appointment = {
-      id: '', // Will be set by API
+      id: '',
       clientName: selectedClient.name,
       service: serviceName,
       time: normalizedTime,
-      duration: parseInt(duration) || selectedService?.duration || 60,
+      duration: totalDuration,
       status: 'pending',
-      employee: employeeName || 'Non assigné',
+      employee: firstEmployeeName,
       phone: selectedClient.phone || undefined,
       email: selectedClient.email || undefined,
       date: normalizedDate,
       notes,
       clientId: selectedClient.id,
-      serviceId: serviceIds[0] || serviceId,
+      serviceId: serviceIds[0] || '',
       serviceIds,
-      employeeId: employeeId || null,
+      employeeId: firstEmployeeId,
+      servicesPayload,
       tenantId: createTenantId || undefined,
     };
 
-    onCreateAppointment(newAppointment);
+    try {
+      await onCreateAppointment(newAppointment);
+    } catch (err: any) {
+      const msg = getApiErrorMessage(err, '');
+      setCreateError(msg || 'Erreur lors de la création du rendez-vous');
+      setTimeout(() => setCreateError(null), CREATE_ERROR_AUTO_DISMISS_MS);
+      toast.custom(
+        (t) => (
+          <div className={`bg-red-50 border border-red-200 rounded-lg shadow-lg p-4 max-w-md ${t.visible ? 'animate-in slide-in-from-top-2' : ''}`}>
+            <p className="font-semibold text-red-800 text-sm">Impossible de créer le rendez-vous</p>
+            <p className="text-sm text-red-600 mt-1">{msg || 'Ce créneau n\'est plus disponible. Veuillez en choisir un autre.'}</p>
+          </div>
+        ),
+        { duration: 5000 }
+      );
+    }
   };
-  
-  // Helper function to check if employee is available
-  const isEmployeeAvailable = (empId: string, date: Date | undefined, time: string): boolean => {
-    if (!date || !time || !empId) return true;
-    
-    const employee = employeesData.find(emp => emp.id === empId);
-    if (!employee || !employee.workingHours) return true;
-    
-    const workingHours = employee.workingHours;
-    if (!Array.isArray(workingHours)) return true;
-    
-    const dayNames = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
-    const dayName = dayNames[date.getDay()];
-    
-    const daySchedule = workingHours.find((wh: any) => wh.day === dayName);
-    if (!daySchedule || !daySchedule.isWorking) return false;
-    
-    const [timeHours, timeMinutes] = time.split(':').map(Number);
-    const timeInMinutes = timeHours * 60 + timeMinutes;
-    
-    const [startHours, startMinutes] = daySchedule.startTime.split(':').map(Number);
-    const startInMinutes = startHours * 60 + startMinutes;
-    
-    const [endHours, endMinutes] = daySchedule.endTime.split(':').map(Number);
-    const endInMinutes = endHours * 60 + endMinutes;
-    
-    if (timeInMinutes < startInMinutes || timeInMinutes >= endInMinutes) {
-      return false;
-    }
-    
-    if (daySchedule.breaks && Array.isArray(daySchedule.breaks)) {
-      for (const breakTime of daySchedule.breaks) {
-        const [breakStartHours, breakStartMinutes] = breakTime.start.split(':').map(Number);
-        const breakStartInMinutes = breakStartHours * 60 + breakStartMinutes;
-        
-        const [breakEndHours, breakEndMinutes] = breakTime.end.split(':').map(Number);
-        const breakEndInMinutes = breakEndHours * 60 + breakEndMinutes;
-        
-        if (timeInMinutes >= breakStartInMinutes && timeInMinutes < breakEndInMinutes) {
-          return false;
-        }
-      }
-    }
-    
-    return true;
-  };
-  
-  // Get available employees based on selected date/time
-  const availableEmployees = date && time 
-    ? employees.filter(emp => isEmployeeAvailable(emp.id, date, time))
-    : employees;
-  
-  // Update duration and label when services change
-  useEffect(() => {
-    const selectedServiceObjects = services.filter((s) => serviceIds.includes(s.id));
-    if (selectedServiceObjects.length > 0) {
-      const totalDuration = selectedServiceObjects.reduce((sum, s) => sum + s.duration, 0);
-      setDuration(totalDuration.toString());
-      setService(selectedServiceObjects.map((s) => s.name).join(', '));
-      if (serviceId && !selectedServiceObjects.some((s) => s.id === serviceId)) {
-        setServiceId(selectedServiceObjects[0].id);
-      }
-    } else if (serviceId) {
-      const selectedService = services.find((s) => s.id === serviceId);
-      if (selectedService) {
-        setDuration(selectedService.duration.toString());
-        setService(selectedService.name);
-      }
-    }
-  }, [serviceId, serviceIds, services]);
-  
-  // Reset employee selection if selected employee becomes unavailable
-  useEffect(() => {
-    if (employeeId && date && time && !isEmployeeAvailable(employeeId, date, time)) {
-      setEmployeeId('');
-      setEmployee('');
-    }
-  }, [date, time, employeeId]);
 
   return (
   <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
@@ -610,10 +655,7 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
               onValueChange={(id) => {
                 setCreateTenantId(id);
                 setSelectedClient(null);
-                setClientSearch('');
-                setServiceId('');
                 setServiceIds([]);
-                setEmployeeId('');
               }}
             >
               <SelectTrigger className="rounded-full px-4 py-2">
@@ -632,11 +674,10 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
           </div>
         )}
 
-        {/* Client Info */}
+        {/* Client */}
         <div className="space-y-4">
           <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider">Client</h3>
           
-          {/* Client Search/Select */}
           <div className="space-y-2">
             <Label>Rechercher un client</Label>
             <ReactSelect
@@ -651,10 +692,23 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
                   handleClientSelect(option.client);
                 } else {
                   setSelectedClient(null);
-                  setClientSearch('');
                 }
               }}
               value={selectedClient ? { value: selectedClient.id, label: `${selectedClient.name} ${selectedClient.email ? `- ${selectedClient.email}` : ''} ${selectedClient.phone ? `- ${selectedClient.phone}` : ''}`, client: selectedClient } : null}
+              formatOptionLabel={(option: any) => {
+                const alerts = clientAlerts[option.client?.id];
+                const msg = alerts?.length > 0 ? alerts[0].message : undefined;
+                return (
+                  <div className="flex items-center gap-2">
+                    <span>{option.label}</span>
+                    {msg && (
+                      <span title={msg}>
+                        <AlertTriangle size={14} className="text-amber-500 shrink-0" />
+                      </span>
+                    )}
+                  </div>
+                );
+              }}
               className="mt-2 text-sm"
               styles={{
                 control: (base) => ({
@@ -672,7 +726,6 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
             />
           </div>
 
-          {/* Show selected client info or manual entry */}
           {selectedClient ? (
             <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
               <div className="flex items-start justify-between mb-3">
@@ -695,10 +748,9 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
                 </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    setSelectedClient(null);
-                    setClientSearch('');
-                  }}
+                    onClick={() => {
+                      setSelectedClient(null);
+                    }}
                   className="p-1 text-gray-400 hover:text-gray-900 transition-colors"
                 >
                   <X size={16} />
@@ -721,54 +773,28 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
                 )}
               </div>
             </div>
-          ) : isNewClient ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="phone">Téléphone</Label>
-                <Input 
-                  id="phone"
-                  type="tel"
-                  value={newClientPhone}
-                  onChange={(e) => setNewClientPhone(e.target.value)}
-                  placeholder="+33 6 12 34 56 78"
-                  className="rounded-full mt-2 px-4 py-2"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input 
-                  id="email"
-                  type="email"
-                  value={newClientEmail}
-                  onChange={(e) => setNewClientEmail(e.target.value)}
-                  placeholder="sophie.m@email.com"
-                  className="rounded-full mt-2 px-4 py-2"
-                />
-              </div>
-            </div>
           ) : null}
+        </div>
 
-          {/* Services */}
+        {/* Services */}
+        <div className="space-y-4">
+          <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider">Services</h3>
           <div className="space-y-2">
-            <Label htmlFor="service">Services</Label>
+            <Label htmlFor="service">Sélectionner un ou plusieurs services</Label>
             <ReactSelect
               instanceId="service-select"
               isLoading={loading}
               isDisabled={loading || services.length === 0}
-              placeholder={loading ? "Chargement..." : "Sélectionner un ou plusieurs services"}
+              placeholder={loading ? "Chargement..." : "Choisir les services"}
               noOptionsMessage={() =>"Aucun service trouvé"}
               isMulti
               options={services.map((s) => ({ value: s.id, label: `${s.name} (${s.duration} min)`, service: s }))}
               onChange={(options: any) => {
-                const nextValues = (options || []).map((option: any) => option.value);
-                setServiceIds(nextValues);
-                setServiceId(nextValues[0] || '');
+                setServiceIds((options || []).map((option: any) => option.value));
               }}
-              value={(serviceIds.length > 0 ? serviceIds : serviceId ? [serviceId] : []).map((id) => {
-                const selectedService = services.find((s) => s.id === id);
-                return selectedService
-                  ? { value: selectedService.id, label: `${selectedService.name} (${selectedService.duration} min)`, service: selectedService }
-                  : null;
+              value={serviceIds.map((id) => {
+                const s = services.find((sv) => sv.id === id);
+                return s ? { value: s.id, label: `${s.name} (${s.duration} min)`, service: s } : null;
               }).filter(Boolean) as any[]}
               className="mt-2 text-sm"
               styles={{
@@ -786,12 +812,22 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
               isClearable
             />
           </div>
+          {totalDuration > 0 && (
+            <div className="text-sm text-gray-500">
+              Durée totale estimée : <span className="font-medium text-gray-800">{totalDuration} min</span>
+              {plan?.estimatedEndTime && time && (
+                <span className="ml-2">
+                  (fin estimée : <span className="font-medium text-gray-800">{plan.estimatedEndTime}</span>)
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* DateTime */}
+        {/* Date & Time */}
         <div className="space-y-4">
-          <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider">Planification</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider">Date & heure</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Date</Label>
               <Popover>
@@ -818,28 +854,123 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({ onClose, onCr
               </Popover>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="time" className="mb-2">Heure</Label>
+              <Label htmlFor="time" className="mb-2">Heure de début</Label>
               <div className='mt-2'>
-                <DatePickerDemo  value={time} onChange={setTime} id="rdv-time-picker" />
+                <DatePickerDemo value={time} onChange={setTime} id="rdv-time-picker" />
               </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="duration">Durée</Label>
-              <Select value={duration} onValueChange={setDuration}>
-                <SelectTrigger id="duration" className="rounded-full px-4 py-2 mt-2">
-                  <SelectValue placeholder="Sélectionner la durée" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="30">30 min</SelectItem>
-                  <SelectItem value="45">45 min</SelectItem>
-                  <SelectItem value="60">60 min</SelectItem>
-                  <SelectItem value="90">90 min</SelectItem>
-                  <SelectItem value="120">120 min</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
           </div>
         </div>
+
+        {/* Employee Assignment (per service, from plan) */}
+        {serviceIds.length > 0 && date && time && (
+          <div className="space-y-4">
+            <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider">Affectation des employés</h3>
+            
+            {planLoading ? (
+              <div className="flex items-center gap-2 text-sm text-gray-500">
+                <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
+                Calcul de l'affectation optimale...
+              </div>
+            ) : plan ? (
+              <div className="space-y-3">
+                {plan.services.map((svc) => {
+                  const effectiveEmpId = overrides[svc.serviceId] || svc.employees.find((e) => e.recommended)?.employeeId || '';
+                  return (
+                    <div key={svc.serviceId} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-medium text-sm text-gray-800">{svc.serviceName}</span>
+                        <span className="text-xs text-gray-500">{svc.duration} min</span>
+                      </div>
+                      <Select
+                        value={effectiveEmpId}
+                        onValueChange={(value) => {
+                          setOverrides((prev) => ({ ...prev, [svc.serviceId]: value }));
+                        }}
+                      >
+                        <SelectTrigger className="rounded-full px-4 py-2 text-sm">
+                          <SelectValue placeholder="Assigner un employé" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {svc.employees.map((emp) => (
+                            <SelectItem key={emp.employeeId} value={emp.employeeId}>
+                              <div className="flex items-center justify-between w-full gap-2">
+                                <div className="flex items-center gap-1.5">
+                                  <span>{emp.employeeName}</span>
+                                  {!emp.available && (
+                                    <span title={emp.reason || 'Indisponible'}>
+                                      <AlertTriangle size={14} className="text-amber-500 shrink-0" />
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  {emp.recommended && (
+                                    <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full">Recommandé</span>
+                                  )}
+                                  {!emp.available && emp.reason && (
+                                    <span className="text-[10px] text-amber-500">{emp.reason}</span>
+                                  )}
+                                </div>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-sm text-amber-600 bg-amber-50 rounded-lg px-4 py-3">
+                Aucun employé disponible pour cette combinaison de services, date et heure.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Planning Status */}
+        {(() => {
+          // Use plan.alerts as authoritative when available (already includes client overlaps).
+          // Fall back to clientAlerts when no full plan yet (no services selected).
+          const allAlerts = plan ? plan.alerts : (selectedClient ? (clientAlerts[selectedClient.id] || []) : []);
+          if (allAlerts.length === 0) return null;
+          const warnings = allAlerts.filter((a) => a.severity === 'warning');
+          const conflicts = allAlerts.filter((a) => a.severity === 'conflict');
+          if (warnings.length === 0 && conflicts.length === 0) return null;
+          return (
+            <div className="space-y-3 p-4 bg-gray-50 rounded-xl border border-gray-200">
+              <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider">État du planning</h3>
+              {warnings.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-amber-700 text-sm font-medium">
+                    <AlertTriangle size={16} />
+                    <span>Avertissements</span>
+                  </div>
+                  {warnings.map((w, i) => (
+                    <div key={i} className="flex items-start gap-2 text-sm text-amber-800 ml-1">
+                      <span className="text-amber-400 mt-0.5">•</span>
+                      <span>{w.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {conflicts.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-red-700 text-sm font-medium">
+                    <XCircle size={16} />
+                    <span>Conflits</span>
+                  </div>
+                  {conflicts.map((c, i) => (
+                    <div key={i} className="flex items-start gap-2 text-sm text-red-800 ml-1">
+                      <span className="text-red-400 mt-0.5">•</span>
+                      <span>{c.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Notes */}
         <div className="space-y-4">
@@ -1078,11 +1209,11 @@ const AppointmentCard: React.FC<AppointmentCardProps> = ({
           </Popover>
         </div>
       </div>
-      {!isCompact && apt.employee && (
+      {!isCompact && (
         <div className="mt-2 pt-2 border-t border-current/10 text-xs opacity-60">
           <div className="flex items-center gap-1">
             <User size={11} />
-            <span className="truncate break-words w-full">{apt.employee}</span>
+            <span className="truncate break-words w-full">{getAppointmentEmployeeLabel(apt)}</span>
           </div>
         </div>
       )}
@@ -1143,12 +1274,9 @@ const RendezVousPage = () => {
 
   // Fetch employees and services from API
   useEffect(() => {
-    console.log('[RendezVous] useEffect triggered, isAuthenticated:', isAuthenticated);
     if (!isAuthenticated) {
-      console.log('[RendezVous] Not authenticated, skipping data fetch');
       return;
     }
-    console.log('[RendezVous] Authenticated, proceeding with data fetch');
     
     const fetchData = async () => {
       try {
@@ -1198,15 +1326,8 @@ const RendezVousPage = () => {
 
     // Fetch header image (only on initial load, not after uploads)
     const fetchHeaderImage = async () => {
-      console.log('[Header Fetch] Starting to fetch header image...');
       try {
-        console.log('[Header Fetch] Calling api.getHeaderImage()...');
         const response = await api.getHeaderImage();
-        console.log('[Header Fetch] Header image response received:', response);
-        console.log('[Header Fetch] Response type:', typeof response);
-        console.log('[Header Fetch] Response.headerImage:', response.headerImage);
-        console.log('[Header Fetch] Response.headerImage type:', typeof response.headerImage);
-        console.log('[Header Fetch] Response.headerImage truthy?', !!response.headerImage);
         
         if (response && response.headerImage) {
           // Use the API endpoint to serve the image file (avoids CORS issues)
@@ -1224,12 +1345,8 @@ const RendezVousPage = () => {
           const imageUrl = tenantId 
             ? `/api/tenant/header-image-file?tenantId=${tenantId}`
             : '/api/tenant/header-image-file';
-          console.log('[Header Fetch] Using API endpoint to serve image:', imageUrl);
           setHeaderImage(imageUrl);
-          console.log('[Header Fetch] Header image state updated');
         } else {
-          console.log('[Header Fetch] No header image found in API response');
-          console.log('[Header Fetch] Response object:', JSON.stringify(response, null, 2));
           // Don't clear - might have been just uploaded and not yet saved, or API delay
         }
       } catch (err: any) {
@@ -1245,14 +1362,9 @@ const RendezVousPage = () => {
       }
     };
 
-    // Fetch header image on every load (ref resets on component remount)
-    console.log('[Header Fetch] useEffect triggered, headerImageFetchedRef.current:', headerImageFetchedRef.current);
     if (!headerImageFetchedRef.current) {
-      console.log('[Header Fetch] Setting ref to true and calling fetchHeaderImage');
       headerImageFetchedRef.current = true;
       fetchHeaderImage();
-    } else {
-      console.log('[Header Fetch] Already fetched, skipping (this should not happen on refresh)');
     }
 
     // Load display settings from API
@@ -1302,7 +1414,6 @@ const RendezVousPage = () => {
     
     const color = getSelectedEmployeeColor();
     if (!color) {
-      console.warn('⚠️ No color found for employee:', selectedEmployee, 'Available employees:', employeeAgendas);
       return {};
     }
     
@@ -1406,11 +1517,6 @@ const RendezVousPage = () => {
       });
       
       const apiAppointments = response.appointments || [];
-      console.log('[Rendez-vous] Total appointments fetched:', apiAppointments.length);
-      console.log('[Rendez-vous] Appointments by status:', apiAppointments.reduce((acc: any, apt: any) => {
-        acc[apt.status] = (acc[apt.status] || 0) + 1;
-        return acc;
-      }, {}));
       const transformed = apiAppointments.map(transformApiAppointment);
       setAppointments(transformed);
     } catch (err) {
@@ -1436,23 +1542,10 @@ const RendezVousPage = () => {
     const selectedEmp = employeeAgendas.find(e => e.name === selectedEmployee);
     
     if (!selectedEmp) {
-      console.warn('⚠️ Selected employee not found:', selectedEmployee, 'Available:', employeeAgendas.map(e => e.name));
-      // If employee not found in list, try to filter by name (case-insensitive, trim whitespace)
-      return appointments.filter(apt => {
-        if (!apt.employee || apt.employee === 'Non assigné') return false;
-        const aptEmployee = apt.employee.trim().toLowerCase();
-        const selected = selectedEmployee.trim().toLowerCase();
-        return aptEmployee === selected;
-      });
+      return appointments.filter(apt => appointmentHasEmployee(apt, selectedEmployee));
     }
     
-    // Filter by name (case-insensitive, trim whitespace)
-    const filtered = appointments.filter(apt => {
-      if (!apt.employee || apt.employee === 'Non assigné') return false;
-      const aptEmployee = apt.employee.trim().toLowerCase();
-      const selected = selectedEmployee.trim().toLowerCase();
-      return aptEmployee === selected;
-    });
+    const filtered = appointments.filter(apt => appointmentHasEmployee(apt, selectedEmployee));
     
     return filtered;
   };
@@ -1601,20 +1694,6 @@ const RendezVousPage = () => {
         newDate.getDate()
       );
       normalizedDate.setHours(0, 0, 0, 0);
-
-      const conflict = findLocalScheduleConflict(appointments, {
-        employeeId: draggedEvent.employeeId,
-        date: normalizedDate,
-        time: newTime,
-        duration: draggedEvent.duration,
-        status: draggedEvent.status,
-        excludeId: draggedEvent.id,
-      });
-      if (conflict) {
-        toast.error('Ce collaborateur a déjà un rendez-vous sur ce créneau.');
-        setDraggedEvent(null);
-        return;
-      }
       
       const updateData = transformToApiAppointment(draggedEvent, normalizedDate, newTime);
       await api.updateAppointment(draggedEvent.id, updateData);
@@ -1629,28 +1708,11 @@ const RendezVousPage = () => {
   };
   
   const handleCreateAppointment = async (appointment: Appointment) => {
-    try {
-      const conflict = findLocalScheduleConflict(appointments, {
-        employeeId: appointment.employeeId,
-        date: appointment.date,
-        time: appointment.time,
-        duration: appointment.duration,
-        status: appointment.status,
-      });
-      if (conflict) {
-        toast.error('Ce collaborateur a déjà un rendez-vous sur ce créneau.');
-        return;
-      }
-
-      const createData = transformToApiAppointment(appointment, appointment.date, appointment.time);
-      await api.createAppointment(createData);
-      
-      await fetchAppointments();
-      setShowNewRDV(false);
-    } catch (err) {
-      console.error('Error creating appointment:', err);
-      toast.error(getApiErrorMessage(err, 'Erreur lors de la création du rendez-vous'));
-    }
+    const createData = transformToApiAppointment(appointment, appointment.date, appointment.time);
+    await api.createAppointment(createData);
+    
+    await fetchAppointments();
+    setShowNewRDV(false);
   };
   
   const handleUpdateAppointmentStatus = async (
@@ -1839,21 +1901,12 @@ const RendezVousPage = () => {
               alt="Header" 
               className="w-full h-full object-cover opacity-10"
               onError={(e) => {
-                console.error('[Header Image] Error loading header image:', headerImage);
-                console.error('[Header Image] Image element:', e.currentTarget);
-                // Don't clear immediately - might be a temporary loading issue
-                // Only clear if it's definitely a 404 or access issue
                 const img = e.currentTarget;
                 setTimeout(() => {
-                  // Check if image still can't load after a moment
                   if (img.complete && img.naturalWidth === 0) {
-                    console.warn('[Header Image] Image failed to load, but keeping state for retry');
-                    // Don't clear - let user retry or check URL
+                    // Image failed, keep state for retry
                   }
                 }, 1000);
-              }}
-              onLoad={() => {
-                console.log('[Header Image] Image loaded successfully:', headerImage);
               }}
             />
             <div className="absolute inset-0 bg-gradient-to-b from-white/80 to-white"></div>
@@ -2003,12 +2056,9 @@ const RendezVousPage = () => {
                     onChange={async (e) => {
                       const file = e.target.files?.[0];
                       if (file) {
-                        console.log('[Header Upload] File selected:', file.name, file.size, file.type);
                         setUploadingHeaderImage(true);
                         try {
-                          console.log('[Header Upload] Starting upload...');
                           const result = await api.uploadHeaderImage(file);
-                          console.log('[Header Upload] Upload response:', result);
                           
                           // Use the API endpoint to serve the image file (avoids CORS issues)
                           // This goes through Next.js proxy to /api/tenant/header-image-file
@@ -2025,20 +2075,9 @@ const RendezVousPage = () => {
                           const imageUrl = tenantId 
                             ? `/api/tenant/header-image-file?tenantId=${tenantId}`
                             : '/api/tenant/header-image-file';
-                          console.log('[Header Upload] Using API endpoint to serve image:', imageUrl);
                           setHeaderImage(imageUrl);
-                          console.log('[Header Upload] Header image uploaded successfully:', imageUrl);
                           
-                          // Verify the image URL is accessible
-                          const testImg = new Image();
-                          testImg.onload = () => {
-                            console.log('[Header Upload] ✓ Image verified and accessible at:', imageUrl);
-                          };
-                          testImg.onerror = () => {
-                            console.error('[Header Upload] ✗ Image NOT accessible at:', imageUrl);
-                            console.error('[Header Upload] Check if the URL is correct and the file exists on the server');
-                          };
-                          testImg.src = imageUrl;
+                          new Image().src = imageUrl;
                         } catch (err: any) {
                           console.error('[Header Upload] Error uploading header image:', err);
                           console.error('[Header Upload] Error details:', {
@@ -2052,8 +2091,6 @@ const RendezVousPage = () => {
                           // Reset input
                           e.target.value = '';
                         }
-                      } else {
-                        console.warn('[Header Upload] No file selected');
                       }
                     }}
                     disabled={uploadingHeaderImage}
@@ -2152,21 +2189,11 @@ const RendezVousPage = () => {
                             apt.time === time &&
                             (filterStatus === 'all' || apt.status === filterStatus);
                           
-                          // Debug logging for this specific time slot
-                          if (time === '09:00' && date.getDate() === 11) {
-                            console.log(`Week filter - ${time} on ${date.getDate()}:`, {
-                              aptName: apt.clientName,
-                              aptTime: apt.time,
-                              aptDate: aptDate.getTime(),
-                              compareDate: compareDate.getTime(),
-                              matches
-                            });
-                          }
-                          
+                              
                           return matches;
                         })
                         .map(apt => {
-                          const employeeColor = employeeAgendas.find(e => e.name === apt.employee)?.color;
+                          const employeeColor = employeeAgendas.find(e => e.name === getPrimaryEmployeeName(apt))?.color;
                           const serviceColor = services.find(s => s.name === apt.service)?.color;
                           return (
                           <AppointmentCard 
@@ -2230,22 +2257,11 @@ const RendezVousPage = () => {
                           apt.time === time &&
                           (filterStatus === 'all' || apt.status === filterStatus);
                         
-                        // Debug logging
-                        if (time === '09:00') {
-                          console.log(`Day filter - ${time}:`, {
-                            aptName: apt.clientName,
-                            aptTime: apt.time,
-                            aptDate: aptDate.getTime(),
-                            compareDate: compareDate.getTime(),
-                            currentDate: currentDate.toString(),
-                            matches
-                          });
-                        }
                         
                         return matches;
                       })
                       .map(apt => {
-                        const employeeColor = employeeAgendas.find(e => e.name === apt.employee)?.color;
+                        const employeeColor = employeeAgendas.find(e => e.name === getPrimaryEmployeeName(apt))?.color;
                         const serviceColor = services.find(s => s.name === apt.service)?.color;
                         return (
                           <AppointmentCard 
@@ -2352,7 +2368,7 @@ const RendezVousPage = () => {
                     {/* Appointments - use AppointmentCard for color logic */}
                     <div className="space-y-1">
                       {dayAppointments.slice(0, 3).map(apt => {
-                        const employeeColor = employeeAgendas.find(e => e.name === apt.employee)?.color;
+                        const employeeColor = employeeAgendas.find(e => e.name === getPrimaryEmployeeName(apt))?.color;
                         const serviceColor = services.find(s => s.name === apt.service)?.color;
                         return (
                           <AppointmentCard 
@@ -2471,7 +2487,7 @@ const RendezVousPage = () => {
                   </div>
                   <div className="flex items-center gap-2 text-sm text-gray-600">
                     <User size={16} />
-                    <span>{selectedAppointment.employee || 'Non assigné'}</span>
+                    <span>{getAppointmentEmployeeLabel(selectedAppointment)}</span>
                   </div>
                 </div>
               </div>
@@ -2480,15 +2496,26 @@ const RendezVousPage = () => {
               <div>
                 <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-3">Services</h3>
                 <div className="space-y-2">
-                  {(selectedAppointment.services && selectedAppointment.services.length > 0 ? selectedAppointment.services : [{ name: selectedAppointment.service, duration: selectedAppointment.duration, price: selectedAppointment.totalPrice ?? selectedAppointment.servicePrice ?? 0, sortOrder: 0 }]).map((service, index) => (
+                  {(selectedAppointment.services && selectedAppointment.services.length > 0 ? selectedAppointment.services : [{ name: selectedAppointment.service, duration: selectedAppointment.duration, price: selectedAppointment.totalPrice ?? selectedAppointment.servicePrice ?? 0, sortOrder: 0 }]).map((service, index) => {
+                    const empName = service.employee ? `${service.employee.firstName} ${service.employee.lastName}` : null;
+                    return (
                     <div key={`${service.name}-${index}`} className="flex items-start justify-between rounded-lg border border-gray-100 px-3 py-2">
                       <div>
                         <p className="text-sm font-medium text-gray-900">{service.name}</p>
-                        <p className="text-xs text-gray-500">{service.duration} min</p>
+                        <div className="flex items-center gap-2 text-xs text-gray-500">
+                          <span>{service.duration} min</span>
+                          {empName && (
+                            <>
+                              <span>·</span>
+                              <span className="flex items-center gap-1"><User size={11} />{empName}</span>
+                            </>
+                          )}
+                        </div>
                       </div>
                       <p className="text-sm font-medium text-gray-900">{service.price} MAD</p>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 {(selectedAppointment.totalDuration || selectedAppointment.totalPrice) && (
                   <div className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-700">

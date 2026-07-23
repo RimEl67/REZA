@@ -10,6 +10,13 @@ export type GuestParticipant = {
   familyMemberId?: string;
   sameServicesAsBooker: boolean;
   serviceIds: string[];
+  employeeId?: string | null;
+  /** Custom time when participant has independent schedule (HH:MM) */
+  customTime?: string;
+  /** Custom date when participant has independent schedule (YYYY-MM-DD) */
+  customDate?: string;
+  /** When true, participant mirrors the main booker's date/time */
+  followsBookerSchedule: boolean;
 };
 
 export type FamilyMemberOption = {
@@ -64,6 +71,7 @@ export default function GroupParticipantsSection({
         name: '',
         sameServicesAsBooker: true,
         serviceIds: [],
+        followsBookerSchedule: true,
       },
     ]);
   };
@@ -84,6 +92,7 @@ export default function GroupParticipantsSection({
         name: displayName,
         sameServicesAsBooker: true,
         serviceIds: [],
+        followsBookerSchedule: true,
       },
     ]);
   };

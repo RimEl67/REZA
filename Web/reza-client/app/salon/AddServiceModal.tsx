@@ -16,14 +16,14 @@ type Category = {
 
 type AddServiceModalProps = {
   selectedServices: Service[];
-  setSelectedServices: (services: Service[]) => void;
+  onSelectServices: (services: Service[]) => void;
   onClose: () => void;
-  salonServices: Category[]; // <-- Add this prop
+  salonServices: Category[];
 };
 
 const AddServiceModal: React.FC<AddServiceModalProps> = ({
   selectedServices,
-  setSelectedServices,
+  onSelectServices,
   onClose,
   salonServices,
 }) => {
@@ -60,7 +60,7 @@ const AddServiceModal: React.FC<AddServiceModalProps> = ({
   };
 
   const handleFinish = () => {
-    setSelectedServices(localSelected);
+    onSelectServices(localSelected);
     onClose();
   };
 

@@ -105,12 +105,19 @@ class ApiClient {
     email?: string;
     serviceIds: string[];
     startTime: string;
+    employeeId?: string | null;
+    /** Per-service employee assignment for the booker (when "Même employé" is unchecked). */
+    serviceEmployees?: Array<{ serviceId: string; employeeId: string | null }>;
     notes?: string;
     participants?: Array<{
       name: string;
       clientId?: string;
       sameServicesAsBooker?: boolean;
       serviceIds?: string[];
+      employeeId?: string | null;
+      /** Per-service employee assignment for this participant. */
+      serviceEmployees?: Array<{ serviceId: string; employeeId: string | null }>;
+      startTime?: string;
     }>;
     /** false = contact only; appointments for participants only */
     includeBooker?: boolean;
@@ -133,6 +140,68 @@ class ApiClient {
     serviceIds.forEach(id => params.append('serviceIds', id));
     if (employeeId) params.append('employeeId', employeeId);
     return this.request<{ slots: string[] }>(`/public/tenant/${tenantId}/available-slots?${params.toString()}`);
+  }
+
+  // Get per-employee availability status for date + time + services
+  async getEmployeeAvailability(tenantId: string, date: string, startTime: string, serviceIds: string[]) {
+    const params = new URLSearchParams();
+    params.append('date', date);
+    params.append('startTime', startTime);
+    serviceIds.forEach(id => params.append('serviceIds', id));
+    return this.request<{
+      employees: Array<{
+        id: string;
+        firstName: string;
+        lastName: string;
+        available: boolean;
+        reason: string | null;
+        recommended: boolean;
+      }>;
+      commonEmployeeIds: string[];
+      services: Array<{
+        serviceId: string;
+        serviceName: string;
+        employees: Array<{
+          id: string;
+          firstName: string;
+          lastName: string;
+          available: boolean;
+          reason: string | null;
+          recommended: boolean;
+        }>;
+      }>;
+    }>(`/public/tenant/${tenantId}/employee-availability?${params.toString()}`);
+  }
+
+  // Resolve cross-participant conflicts via backend backtracking
+  // Backend receives: date, changedParticipantIndex, selectedEmployeeId, participants[].currentEmployeeId
+  async resolveConflicts(
+    tenantId: string,
+    date: string,
+    changedParticipantIndex: number,
+    selectedEmployeeId: string | null,
+    participants: Array<{
+      index: number;
+      serviceIds: string[];
+      startTime: string;
+      duration: number;
+      currentEmployeeId: string | null;
+    }>,
+  ) {
+    return this.request<{
+      resolved: boolean;
+      conflict: boolean;
+      message?: string;
+      assignments?: Array<{
+        index: number;
+        employeeId: string;
+        locked: boolean;
+        autoAssigned: boolean;
+      }>;
+    }>(`/public/tenant/${tenantId}/resolve-conflicts`, {
+      method: 'POST',
+      body: JSON.stringify({ date, changedParticipantIndex, selectedEmployeeId, participants }),
+    });
   }
 
   // Create a public review

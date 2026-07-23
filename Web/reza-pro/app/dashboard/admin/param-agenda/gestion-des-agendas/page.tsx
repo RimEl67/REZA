@@ -19,15 +19,12 @@ type WorkingHours = {
 };
 
 type EmployeeAgenda = {
-  id: string; // Changed from number to string (employee ID)
+  id: string;
   name: string;
   email: string;
   color: string;
   role: string;
   workingHours: WorkingHours[];
-  timeSlotDuration: number;
-  bufferTime: number;
-  maxAppointmentsPerDay: number;
   allowOnlineBooking: boolean;
   services: string[];
   status: 'active' | 'inactive' | 'vacation';
@@ -64,9 +61,6 @@ const transformEmployeeToAgenda = (employee: any): EmployeeAgenda => {
     color: agendaSettings.color || '#3B82F6',
     role: agendaSettings.role || '',
     workingHours: Array.isArray(workingHours) ? workingHours : defaultWorkingHours,
-    timeSlotDuration: agendaSettings.timeSlotDuration || 30,
-    bufferTime: agendaSettings.bufferTime || 5,
-    maxAppointmentsPerDay: agendaSettings.maxAppointmentsPerDay || 12,
     allowOnlineBooking: agendaSettings.allowOnlineBooking !== false,
     services,
     status
@@ -81,9 +75,6 @@ const transformAgendaToEmployee = (agenda: EmployeeAgenda, existingEmployee?: an
   const agendaSettings = {
     color: agenda.color,
     role: agenda.role,
-    timeSlotDuration: agenda.timeSlotDuration,
-    bufferTime: agenda.bufferTime,
-    maxAppointmentsPerDay: agenda.maxAppointmentsPerDay,
     allowOnlineBooking: agenda.allowOnlineBooking,
     status: agenda.status
   };
@@ -195,9 +186,6 @@ const GestionDesAgendas = () => {
         agendaSettings: {
           color: agenda.color,
           role: agenda.role,
-          timeSlotDuration: agenda.timeSlotDuration,
-          bufferTime: agenda.bufferTime,
-          maxAppointmentsPerDay: agenda.maxAppointmentsPerDay,
           allowOnlineBooking: agenda.allowOnlineBooking,
           status: agenda.status
         },
@@ -598,14 +586,7 @@ const AgendaCard = ({ agenda, onEdit, onDelete, onDuplicate }: {
           <p className="text-xs text-gray-500">Heures/semaine</p>
           <p className="text-sm font-medium text-gray-900">{totalHoursPerWeek}h</p>
         </div>
-        <div className="space-y-1">
-          <p className="text-xs text-gray-500">Créneaux</p>
-          <p className="text-sm font-medium text-gray-900">{agenda.timeSlotDuration} min</p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-xs text-gray-500">RDV max/jour</p>
-          <p className="text-sm font-medium text-gray-900">{agenda.maxAppointmentsPerDay}</p>
-        </div>
+
       </div>
 
       {/* Working Days */}
@@ -673,21 +654,13 @@ const AgendaModal = ({
   salonOptions?: Array<{ id: string; name: string }>;
 }) => {
   const [formData, setFormData] = useState<EmployeeAgenda>(
-    agenda ? {
-      ...agenda,
-      timeSlotDuration: agenda.timeSlotDuration || 30,
-      bufferTime: agenda.bufferTime || 5,
-      maxAppointmentsPerDay: agenda.maxAppointmentsPerDay || 12,
-    } : {
+    agenda ? { ...agenda } : {
       id: '',
       name: '',
       email: '',
       color: '#3B82F6',
       role: '',
       workingHours: defaultWorkingHours,
-      timeSlotDuration: 30,
-      bufferTime: 5,
-      maxAppointmentsPerDay: 12,
       allowOnlineBooking: true,
       services: [],
       status: 'active'
@@ -976,58 +949,6 @@ const AgendaModal = ({
           {/* Settings Tab */}
           {activeTab === 'settings' && (
             <div className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Durée des créneaux (min)
-                  </label>
-                  <input
-                    type="number"
-                    value={formData.timeSlotDuration || 30}
-                    onChange={(e) => {
-                      const value = parseInt(e.target.value) || 30;
-                      setFormData({ ...formData, timeSlotDuration: value });
-                    }}
-                    className="w-full px-4 py-2.5 border border-gray-200 rounded-full focus:outline-none focus:ring-2 focus:ring-gray-900"
-                    min={5}
-                    step={5}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Temps tampon (min)
-                  </label>
-                  <input
-                    type="number"
-                    value={formData.bufferTime || 5}
-                    onChange={(e) => {
-                      const value = parseInt(e.target.value) || 5;
-                      setFormData({ ...formData, bufferTime: value });
-                    }}
-                    className="w-full px-4 py-2.5 border border-gray-200 rounded-full focus:outline-none focus:ring-2 focus:ring-gray-900"
-                    min={0}
-                    step={5}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    RDV max/jour
-                  </label>
-                  <input
-                    type="number"
-                    value={formData.maxAppointmentsPerDay || 12}
-                    onChange={(e) => {
-                      const value = parseInt(e.target.value) || 12;
-                      setFormData({ ...formData, maxAppointmentsPerDay: value });
-                    }}
-                    className="w-full px-4 py-2.5 border border-gray-200 rounded-full focus:outline-none focus:ring-2 focus:ring-gray-900"
-                    min={1}
-                  />
-                </div>
-              </div>
-
               <div className="flex items-center gap-2">
                 <Checkbox
                   id="allowOnlineBooking"

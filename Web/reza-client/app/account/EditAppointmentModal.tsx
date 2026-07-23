@@ -387,7 +387,7 @@ const EditAppointmentModal: React.FC<EditAppointmentModalProps> = ({
               {showAddServiceModal && (
                 <AddServiceModal
                   selectedServices={services}
-                  setSelectedServices={handleAddServices}
+                  onSelectServices={handleAddServices}
                   onClose={() => setShowAddServiceModal(false)}
                   salonServices={availableSalonServices}
                 />

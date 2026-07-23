@@ -97,17 +97,7 @@ export default function ProOnboardingPage() {
   return (
     <div className="min-h-screen [background-color:#f5f7f3] flex flex-col">
       {loading && (
-        <Loading
-          text={
-            <span
-              key={loadingTextKey}
-              className="inline-block animate-fadein"
-              style={{ transition: 'opacity 0.3s' }}
-            >
-              {loadingText}
-            </span>
-          }
-        />
+        <Loading text={loadingText} />
       )}
       {/* Header */}
       <header className="[background-color:#f5f7f3] border-gray-200 py-6 px-6">

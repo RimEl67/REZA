@@ -803,6 +803,26 @@ class ApiClient {
     return this.request<any>(`/appointments/${id}`);
   }
 
+  async planAppointment(params: {
+    serviceIds: string[];
+    date: string;
+    startTime: string;
+    clientId?: string;
+    assignments?: { serviceId: string; employeeId: string | null }[];
+  }) {
+    return this.request<any>('/appointments/plan', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  }
+
+  async clientDiagnostics(params: { date: string; startTime: string; estimatedDuration?: number }) {
+    return this.request<{ clientAlerts: Record<string, { severity: string; type: string; message: string }[]> }>('/appointments/client-diagnostics', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  }
+
   async createAppointment(appointmentData: any) {
     return this.request<any>('/appointments', {
       method: 'POST',
