@@ -31,11 +31,20 @@ export const updatePublicFamilyMemberSchema = z.object({
   avatar: z.string().optional()
 });
 
+const serviceEmployeeItemSchema = z.object({
+  serviceId: z.string(),
+  employeeId: z.string().nullable(),
+});
+
 export const bookingParticipantSchema = z.object({
   name: z.string().min(1, 'Participant name is required'),
   clientId: z.string().optional(),
   sameServicesAsBooker: z.boolean().optional(),
   serviceIds: z.array(z.string()).optional(),
+  employeeId: z.string().nullable().optional(),
+  /** Per-service employee assignment (when "Même employé" is unchecked). */
+  serviceEmployees: z.array(serviceEmployeeItemSchema).optional(),
+  startTime: z.string().optional(),
 });
 
 export const createPublicBookingSchema = z.object({
@@ -46,6 +55,9 @@ export const createPublicBookingSchema = z.object({
   email: z.string().email().optional().or(z.literal('')),
   serviceIds: z.array(z.string()).min(1),
   startTime: z.string().min(1),
+  employeeId: z.string().nullable().optional(),
+  /** Per-service employee assignment for the booker. */
+  serviceEmployees: z.array(serviceEmployeeItemSchema).optional(),
   notes: z.string().optional(),
   /** When false, booker is contact only — appointments only for participants. */
   includeBooker: z.boolean().optional().default(true),

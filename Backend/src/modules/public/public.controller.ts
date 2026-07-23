@@ -136,6 +136,26 @@ export class PublicController {
     }
   }
 
+  async getEmployeeAvailability(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await bookingService.getEmployeeAvailability(req.params.tenantId, req.query);
+      res.json(result);
+    } catch (error) {
+      if (handlePublicError(error, res, next)) return;
+      next(error);
+    }
+  }
+
+  async resolveParticipantConflicts(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await bookingService.resolveParticipantConflicts(req.params.tenantId, req.body);
+      res.json(result);
+    } catch (error) {
+      if (handlePublicError(error, res, next)) return;
+      next(error);
+    }
+  }
+
   async getClientAppointments(req: Request, res: Response, next: NextFunction) {
     try {
       const result = await clientAppointmentsService.getClientAppointments(req.params.email, req.query);

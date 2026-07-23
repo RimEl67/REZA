@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma';
+import { schedulingService } from '../appointment/scheduling.service';
 
 export class AvailabilityService {
   async getAvailability(tenantId: string, date: string, serviceIdsArray: string[], employeeId?: string) {
@@ -54,46 +55,6 @@ export class AvailabilityService {
       return [];
     }
 
-    const startOfDay = new Date(selectedDate);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(selectedDate);
-    endOfDay.setHours(23, 59, 59, 999);
-
-    const where: any = {
-      tenantId: tenant.id,
-      startTime: {
-        gte: startOfDay,
-        lte: endOfDay
-      },
-      status: {
-        in: ['PENDING', 'CONFIRMED', 'IN_PROGRESS']
-      }
-    };
-
-    if (employeeId) {
-      const employee = await prisma.employee.findFirst({
-        where: { id: employeeId, tenantId: tenant.id }
-      });
-      if (employee?.email) {
-        const user = await prisma.user.findFirst({
-          where: { email: employee.email, tenantId: tenant.id }
-        });
-        if (user) {
-          where.employeeId = user.id;
-        }
-      }
-    }
-
-    const appointments = await prisma.appointment.findMany({
-      where,
-      select: {
-        startTime: true,
-        endTime: true,
-        duration: true
-      }
-    });
-
-    const slots: string[] = [];
     const [openHour, openMin] = hours.open.split(':').map(Number);
     const [closeHour, closeMin] = hours.close.split(':').map(Number);
     
@@ -109,29 +70,28 @@ export class AvailabilityService {
     const selectedDay = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
     const isToday = today.getTime() === selectedDay.getTime();
 
+    const slots: string[] = [];
     const slotDuration = 30;
     let currentTime = new Date(openTime);
     
     while (currentTime.getTime() + totalDuration * 60000 <= closeTime.getTime()) {
-      const slotEnd = new Date(currentTime.getTime() + totalDuration * 60000);
-      
       if (isToday && currentTime.getTime() <= now.getTime()) {
         currentTime = new Date(currentTime.getTime() + slotDuration * 60000);
         continue;
       }
-      
-      const hasConflict = appointments.some((apt: any) => {
-        const aptStart = new Date(apt.startTime);
-        const aptEnd = new Date(apt.endTime);
-        return (
-          (currentTime.getTime() < aptEnd.getTime() && slotEnd.getTime() > aptStart.getTime())
-        );
+
+      const timeStr = `${String(currentTime.getHours()).padStart(2, '0')}:${String(currentTime.getMinutes()).padStart(2, '0')}`;
+
+      // Use the scheduling engine to check if this start time is feasible
+      const slotCheck = await schedulingService.checkSlotAvailability({
+        tenantId: tenant.id,
+        serviceIds: serviceIdsArray,
+        date,
+        startTime: timeStr,
       });
 
-      if (!hasConflict) {
-        const hoursStr = currentTime.getHours().toString().padStart(2, '0');
-        const minutesStr = currentTime.getMinutes().toString().padStart(2, '0');
-        slots.push(`${hoursStr}:${minutesStr}`);
+      if (slotCheck.available) {
+        slots.push(timeStr);
       }
 
       currentTime = new Date(currentTime.getTime() + slotDuration * 60000);

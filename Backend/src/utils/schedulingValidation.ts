@@ -12,6 +12,132 @@ interface ValidationParams {
   excludeAppointmentId?: string;
   /** When false, only overlap/time rules run (e.g. drag same employee+service). */
   validateServiceCompatibility?: boolean;
+  source?: 'ADMIN' | 'PUBLIC';
+}
+
+const DAY_NAMES_FR_EN: Record<number, string[]> = {
+  0: ['dimanche', 'sunday', '0'],
+  1: ['lundi', 'monday', '1'],
+  2: ['mardi', 'tuesday', '2'],
+  3: ['mercredi', 'wednesday', '3'],
+  4: ['jeudi', 'thursday', '4'],
+  5: ['vendredi', 'friday', '5'],
+  6: ['samedi', 'saturday', '6'],
+};
+
+export function isSameDayName(dayInDb: string | undefined | null, dayIndex: number): boolean {
+  if (!dayInDb) return false;
+  const normalized = dayInDb.trim().toLowerCase();
+  return (DAY_NAMES_FR_EN[dayIndex] || []).includes(normalized);
+}
+
+export function getMinutesSinceMidnight(date: Date, timeZone: string = 'Africa/Casablanca'): number {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(date);
+  let hour = 0;
+  let minute = 0;
+  for (const part of parts) {
+    if (part.type === 'hour') hour = parseInt(part.value, 10);
+    if (part.type === 'minute') minute = parseInt(part.value, 10);
+  }
+  if (hour === 24) hour = 0;
+  return hour * 60 + minute;
+}
+
+export function getDayOfWeekInTimezone(date: Date, timeZone: string = 'Africa/Casablanca'): number {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'short',
+  });
+  const dayStr = formatter.format(date);
+  const days: Record<string, number> = {
+    Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+  };
+  return days[dayStr] ?? date.getDay();
+}
+
+export interface WorkingHoursCheckResult {
+  isAvailable: boolean;
+  status?: 400 | 409;
+  error?: string;
+  message?: string;
+  reason?: 'DAY_OFF' | 'OUTSIDE_HOURS' | 'BREAK';
+  breakRange?: string;
+}
+
+/**
+ * Shared checking function for employee working hours, break periods, and days off.
+ */
+export function checkEmployeeWorkingHoursAndBreaks(params: {
+  workingHours: any[] | null;
+  startTime: Date;
+  endTime: Date;
+  timeZone?: string;
+}): WorkingHoursCheckResult {
+  const { workingHours, startTime, endTime, timeZone = 'Africa/Casablanca' } = params;
+
+  if (!workingHours || !Array.isArray(workingHours) || workingHours.length === 0) {
+    return { isAvailable: true };
+  }
+
+  const dayIndex = getDayOfWeekInTimezone(startTime, timeZone);
+  const dayData = workingHours.find((d: any) => isSameDayName(d.day, dayIndex));
+
+  if (!dayData || !dayData.isWorking) {
+    return {
+      isAvailable: false,
+      status: 400,
+      error: 'Employee day off',
+      message: 'Cet employé ne travaille pas ce jour-là.',
+      reason: 'DAY_OFF',
+    };
+  }
+
+  const startMinutes = getMinutesSinceMidnight(startTime, timeZone);
+  const endMinutes = getMinutesSinceMidnight(endTime, timeZone);
+
+  const [openH, openM] = (dayData.startTime || '00:00').split(':').map(Number);
+  const [closeH, closeM] = (dayData.endTime || '23:59').split(':').map(Number);
+  const empOpenMinutes = openH * 60 + openM;
+  const empCloseMinutes = closeH * 60 + closeM;
+
+  if (startMinutes < empOpenMinutes || endMinutes > empCloseMinutes) {
+    return {
+      isAvailable: false,
+      status: 400,
+      error: 'Outside working hours',
+      message: `Ce créneau est en dehors des horaires de travail de cet employé (${dayData.startTime} - ${dayData.endTime}).`,
+      reason: 'OUTSIDE_HOURS',
+    };
+  }
+
+  if (dayData.breaks && Array.isArray(dayData.breaks)) {
+    for (const b of dayData.breaks) {
+      if (!b.start || !b.end) continue;
+      const [bsH, bsM] = b.start.split(':').map(Number);
+      const [beH, beM] = b.end.split(':').map(Number);
+      const breakStart = bsH * 60 + bsM;
+      const breakEnd = beH * 60 + beM;
+
+      if (startMinutes < breakEnd && endMinutes > breakStart) {
+        return {
+          isAvailable: false,
+          status: 400,
+          error: 'Employee on break',
+          message: `Cet employé est en pause à cette heure (${b.start} - ${b.end}).`,
+          reason: 'BREAK',
+          breakRange: `${b.start}-${b.end}`,
+        };
+      }
+    }
+  }
+
+  return { isAvailable: true };
 }
 
 export async function findOverlappingAppointment(params: {
@@ -36,7 +162,6 @@ export async function findOverlappingAppointment(params: {
   });
 }
 
-/** When no employee is assigned, block slots that overlap any active appointment at the tenant. */
 export async function findTenantWideOverlappingAppointment(params: {
   tenantId: string;
   startTime: Date;
@@ -67,6 +192,7 @@ export async function validateAppointmentRules(params: ValidationParams) {
     isPublicBooking,
     excludeAppointmentId,
     validateServiceCompatibility = isPublicBooking,
+    source,
   } = params;
 
   if (endTime <= startTime) {
@@ -137,21 +263,15 @@ export async function validateAppointmentRules(params: ValidationParams) {
   }
 
   if (!employeeId) {
-    const tenantOverlap = await findTenantWideOverlappingAppointment({
-      tenantId,
-      startTime,
-      endTime,
-      excludeAppointmentId,
-    });
-    if (tenantOverlap) {
-      return {
-        isValid: false,
-        status: 409,
-        error: 'Overlapping appointment',
-        message: 'Ce créneau n\'est plus disponible. Veuillez en choisir un autre.',
-      };
+    if (source === 'ADMIN') {
+      return { isValid: true };
     }
-    return { isValid: true };
+    return {
+      isValid: false,
+      status: 409,
+      error: 'Overlapping appointment',
+      message: 'Ce créneau n\'est plus disponible. Veuillez en choisir un autre.',
+    };
   }
 
   const user = await prisma.user.findFirst({
@@ -167,23 +287,39 @@ export async function validateAppointmentRules(params: ValidationParams) {
     };
   }
 
-  if (validateServiceCompatibility && user.email) {
-    const employee = await prisma.employee.findFirst({
-      where: { email: user.email, tenantId, isActive: true },
-      include: { employeeServices: true },
+  // 1. Employee Working Hours, Day-Off, and Break Periods Check
+  const employee = await prisma.employee.findFirst({
+    where: {
+      tenantId,
+      isActive: true,
+      OR: [{ id: employeeId }, { email: user.email }],
+    },
+    include: { employeeServices: true },
+  });
+
+  if (employee && employee.workingHours) {
+    const whResult = checkEmployeeWorkingHoursAndBreaks({
+      workingHours: employee.workingHours as any[],
+      startTime,
+      endTime,
+      timeZone: settings?.timezone || 'Africa/Casablanca',
     });
 
-    if (!employee) {
-      return {
-        isValid: false,
-        status: 404,
-        error: 'Invalid employee',
-        message: "L'utilisateur sélectionné n'est pas configuré comme collaborateur.",
-      };
+    if (!whResult.isAvailable) {
+      if (source === 'ADMIN') {
+        return {
+          isValid: false,
+          status: whResult.status || 400,
+          error: whResult.error || 'Employee unavailable',
+          message: whResult.message || 'Cet employé n\'est pas disponible.',
+        };
+      }
     }
+  }
 
+  // 2. Service Compatibility Check
+  if (validateServiceCompatibility && employee) {
     const employeeAllowedServiceIds = employee.employeeServices.map((es) => es.serviceId);
-    // No linked services = no restriction configured for this employee
     if (employeeAllowedServiceIds.length > 0) {
       for (const serviceId of serviceIds) {
         if (!employeeAllowedServiceIds.includes(serviceId)) {
@@ -198,6 +334,7 @@ export async function validateAppointmentRules(params: ValidationParams) {
     }
   }
 
+  // 3. Employee Overlap Check
   const overlappingAppointment = await findOverlappingAppointment({
     tenantId,
     employeeId,
@@ -207,6 +344,9 @@ export async function validateAppointmentRules(params: ValidationParams) {
   });
 
   if (overlappingAppointment) {
+    if (source === 'ADMIN') {
+      return { isValid: true };
+    }
     return {
       isValid: false,
       status: 409,

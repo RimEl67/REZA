@@ -1,6 +1,7 @@
 /** Shared demo credentials — safe for local/dev seed only. */
 export const PASSWORDS = {
   admin: 'password123',
+  rezaAdmin: '123456',
   superadmin: '123456',
   client: '123456',
 } as const;
@@ -16,6 +17,15 @@ export const SPA_ROYAL_ADMIN = {
   firstName: 'Admin',
   lastName: 'Spa Royal',
 } as const;
+
+export const REZA_ADMIN = {
+  email: 'admin@reza.com',
+  firstName: 'Admin',
+  lastName: 'Reza',
+} as const;
+
+// Pre-hashed bcrypt for 123456 (cost 12)
+export const REZA_ADMIN_HASHED_PASSWORD = '$2a$12$lf7ornt4nWL67x967ECXeOfFzJO9qWVJQ/PiZVfqIHy3GYvl.QWLC';
 
 export const BASE_PLAN = {
   name: 'Standard',

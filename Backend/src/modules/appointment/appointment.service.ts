@@ -1,5 +1,7 @@
 import { prisma } from '../../lib/prisma';
 import { validateAppointmentRules } from '../../utils/schedulingValidation';
+import { resolveEmployeeUserId } from '../../utils/resolveEmployeeUserId';
+import { schedulingService } from './scheduling.service';
 import { formatDateForNotification } from '../../utils/dateTime';
 import { tenantIdFilter } from '../../utils/salonScope';
 import {
@@ -25,7 +27,10 @@ const appointmentListInclude = {
   service: { select: serviceSelect },
   services: {
     orderBy: { sortOrder: 'asc' as const },
-    include: { service: { select: serviceSelect } },
+    include: {
+      service: { select: serviceSelect },
+      employee: { select: { id: true, firstName: true, lastName: true } },
+    },
   },
   employee: { select: { id: true, firstName: true, lastName: true } },
   createdBy: { select: { id: true, firstName: true, lastName: true } },
@@ -84,12 +89,24 @@ export class AppointmentService {
     }
 
     if (filters.clientId) where.clientId = filters.clientId;
-    if (filters.employeeId) where.employeeId = filters.employeeId;
-    if (filters.serviceId) {
+    if (filters.employeeId) {
       where.OR = [
+        { employeeId: filters.employeeId },
+        { services: { some: { employeeId: filters.employeeId } } },
+      ];
+    }
+    if (filters.serviceId) {
+      const serviceFilter = [
         { serviceId: filters.serviceId },
         { services: { some: { serviceId: filters.serviceId } } },
       ];
+      if (where.OR) {
+        // Combine with employee OR filter — both must match
+        where.AND = [{ OR: where.OR }, { OR: serviceFilter }];
+        delete where.OR;
+      } else {
+        where.OR = serviceFilter;
+      }
     }
     if (filters.status) where.status = filters.status;
 
@@ -119,7 +136,7 @@ export class AppointmentService {
       include: {
         client: true,
         service: true,
-        services: { orderBy: { sortOrder: 'asc' }, include: { service: true } },
+        services: { orderBy: { sortOrder: 'asc' }, include: { service: true, employee: true } },
         employee: true,
         createdBy: { select: { id: true, firstName: true, lastName: true } },
         invoice: true,
@@ -130,6 +147,7 @@ export class AppointmentService {
 
   async createAppointment(tenantId: string, createdById: string, data: any, isPublicBooking: boolean = false) {
     const startTime = new Date(data.startTime);
+    const source = data.source as 'ADMIN' | 'PUBLIC' | undefined;
 
     const client = await prisma.client.findFirst({ where: { id: data.clientId, tenantId } });
     if (!client) throw new Error('CLIENT_NOT_FOUND');
@@ -140,24 +158,71 @@ export class AppointmentService {
     const endTime = new Date(startTime.getTime() + duration * 60000);
     const primaryService = services[0];
 
+    // Top-level employeeId: legacy field. When data.employeeId is absent (new services[] flow),
+    // this stays null — per-service employees are stored on AppointmentServiceItem.employeeId.
+    let userIdForAppointment: string | null = null;
+    if (data.employeeId) {
+      userIdForAppointment = await resolveEmployeeUserId(tenantId, data.employeeId);
+      if (!userIdForAppointment) throw new Error('INVALID_EMPLOYEE');
+    }
+
     const validationResult = await validateAppointmentRules({
       tenantId,
-      employeeId: null,
+      employeeId: userIdForAppointment,
       serviceIds,
       startTime,
       endTime,
       isPublicBooking,
       validateServiceCompatibility: false,
+      source,
     });
 
     if (!validationResult.isValid) throwValidationError(validationResult);
+
+    // Build per-service employee assignment map from data.services if provided
+    const serviceEmployeeMap = new Map<string, string | null>();
+    if (data.services && Array.isArray(data.services)) {
+      for (const item of data.services) {
+        if (item.employeeId) {
+          const resolved = await resolveEmployeeUserId(tenantId, item.employeeId);
+          serviceEmployeeMap.set(item.serviceId, resolved);
+        } else {
+          serviceEmployeeMap.set(item.serviceId, null);
+        }
+      }
+    }
+
+    // Re-validate final per-service employee assignments before write
+    // (race-window safe — validation and write are in the same execution path)
+    if (data.services && data.services.length > 0) {
+      const dateStr = startTime.toISOString().split('T')[0];
+      const timeStr = `${String(startTime.getHours()).padStart(2, '0')}:${String(startTime.getMinutes()).padStart(2, '0')}`;
+      const assignments = data.services.map((s: any) => ({
+        serviceId: s.serviceId,
+        employeeId: s.employeeId || null,
+      }));
+      const validation = await schedulingService.validateAssignment({
+        tenantId,
+        serviceIds: data.services.map((s: any) => s.serviceId),
+        assignments,
+        startTime: timeStr,
+        date: dateStr,
+        source,
+      });
+      if (!validation.valid) {
+        // Admin overrides employee scheduling conflicts, but skill/day mismatches still block
+        const err: any = new Error('VALIDATION_ERROR');
+        err.details = { status: 409, error: 'Assignment conflict', message: validation.errors[0].message };
+        throw err;
+      }
+    }
 
     const appointment = await prisma.appointment.create({
       data: {
         tenantId,
         clientId: data.clientId,
         serviceId: primaryService.id,
-        employeeId: null,
+        employeeId: userIdForAppointment,
         createdById,
         startTime,
         endTime,
@@ -171,6 +236,7 @@ export class AppointmentService {
             duration: service.duration,
             price: getServicePrice(service),
             sortOrder: index,
+            employeeId: serviceEmployeeMap.get(service.id) ?? null,
           })),
         },
       },
@@ -204,18 +270,33 @@ export class AppointmentService {
       (data.startTime !== undefined &&
         new Date(data.startTime).getTime() !== existing.startTime.getTime()) ||
       (data.duration !== undefined && data.duration !== existing.duration);
-    const scheduleChanged = timeChanged || servicesChanged;
+
+    if (data.employeeId !== undefined) {
+      if (data.employeeId) {
+        const resolvedId = await resolveEmployeeUserId(tenantId, data.employeeId);
+        updateData.employeeId = resolvedId;
+        if (!resolvedId) throw new Error('INVALID_EMPLOYEE');
+      } else {
+        updateData.employeeId = null;
+      }
+    }
+
+    const employeeUserId =
+      updateData.employeeId !== undefined ? updateData.employeeId : existing.employeeId;
+    const employeeChanged =
+      data.employeeId !== undefined && updateData.employeeId !== existing.employeeId;
+    const scheduleChanged = timeChanged || servicesChanged || employeeChanged;
 
     if (scheduleChanged && ACTIVE_APPOINTMENT_STATUSES.has(nextStatus)) {
       const validationResult = await validateAppointmentRules({
         tenantId,
-        employeeId: null,
+        employeeId: employeeUserId,
         serviceIds: nextServices?.map((service) => service.id) ?? [existing.serviceId],
         startTime,
         endTime,
         isPublicBooking: false,
         excludeAppointmentId: id,
-        validateServiceCompatibility: false,
+        validateServiceCompatibility: employeeChanged || servicesChanged,
       });
 
       if (!validationResult.isValid) throwValidationError(validationResult);
@@ -224,12 +305,24 @@ export class AppointmentService {
     updateData.startTime = startTime;
     updateData.duration = duration;
     updateData.endTime = endTime;
-    updateData.employeeId = null;
     if (data.notes !== undefined) updateData.notes = stripGeneratedServicesNotes(data.notes);
     delete updateData.serviceIds;
     delete updateData.services;
 
     if (nextServices) {
+      // Build per-service employee assignment map from data.services if provided
+      const serviceEmployeeMap = new Map<string, string | null>();
+      if (data.services && Array.isArray(data.services)) {
+        for (const item of data.services) {
+          if (item.employeeId) {
+            const resolved = await resolveEmployeeUserId(tenantId, item.employeeId);
+            serviceEmployeeMap.set(item.serviceId, resolved);
+          } else {
+            serviceEmployeeMap.set(item.serviceId, null);
+          }
+        }
+      }
+
       updateData.serviceId = nextServices[0].id;
       updateData.services = {
         deleteMany: {},
@@ -239,6 +332,7 @@ export class AppointmentService {
           duration: service.duration,
           price: getServicePrice(service),
           sortOrder: index,
+          employeeId: serviceEmployeeMap.get(service.id) ?? null,
         })),
       };
     }

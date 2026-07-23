@@ -28,6 +28,12 @@ router.post('/bookings', (req, res, next) => publicController.createBooking(req,
 router.get('/tenant/:tenantId/available-slots', (req, res, next) =>
   publicController.getAvailableSlots(req, res, next)
 );
+router.get('/tenant/:tenantId/employee-availability', (req, res, next) =>
+  publicController.getEmployeeAvailability(req, res, next)
+);
+router.post('/tenant/:tenantId/resolve-conflicts', (req, res, next) =>
+  publicController.resolveParticipantConflicts(req, res, next)
+);
 router.get('/client/:email/appointments', (req, res, next) =>
   publicController.getClientAppointments(req, res, next)
 );

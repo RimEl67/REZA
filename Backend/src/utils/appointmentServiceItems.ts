@@ -15,6 +15,7 @@ type AppointmentServiceItemLike = {
   duration: number;
   price: number;
   sortOrder?: number | null;
+  employee?: { id: string; firstName: string; lastName: string } | null;
   service?: CatalogServiceLike | null;
 };
 
@@ -33,6 +34,7 @@ export type ReservationServiceLine = {
   duration: number;
   price: number;
   sortOrder: number;
+  employee?: { id: string; firstName: string; lastName: string } | null;
 };
 
 const GENERATED_SERVICES_RE =
@@ -87,6 +89,7 @@ export function normalizeAppointmentServices(appointment: AppointmentLike): Rese
       duration: item.duration ?? item.service?.duration ?? 0,
       price: item.price ?? (item.service ? getServicePrice(item.service) : 0),
       sortOrder: item.sortOrder ?? index,
+      employee: item.employee ?? null,
     }));
 
   if (persisted.length > 1) return persisted;

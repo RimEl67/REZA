@@ -94,7 +94,16 @@ export class ClientAppointmentsService {
             serviceName: true,
             duration: true,
             price: true,
-            sortOrder: true
+            sortOrder: true,
+            employeeId: true,
+            employee: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                avatar: true
+              }
+            }
           }
         },
         employee: {

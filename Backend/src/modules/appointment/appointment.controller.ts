@@ -1,7 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { appointmentService } from './appointment.service';
-import { createAppointmentSchema, updateAppointmentSchema } from './appointment.schema';
+import { schedulingService } from './scheduling.service';
+import { createAppointmentSchema, updateAppointmentSchema, planAppointmentSchema, clientDiagnosticsSchema } from './appointment.schema';
 import { isSalonRequiredError, resolveWriteTenantId } from '../../utils/salonScope';
 
 export class AppointmentController {
@@ -54,10 +55,51 @@ export class AppointmentController {
     }
   }
 
+  async planAppointment(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = planAppointmentSchema.parse(req.body);
+      const tenantId = (req.salonIds || [req.tenantId!])[0];
+      const plan = await schedulingService.planReservation({
+        tenantId,
+        serviceIds: data.serviceIds,
+        date: data.date,
+        startTime: data.startTime,
+        clientId: data.clientId,
+        assignments: data.assignments as { serviceId: string; employeeId: string | null }[] | undefined,
+      });
+      res.json(plan);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Validation error', message: error.errors[0].message });
+      }
+      next(error);
+    }
+  }
+
+  async clientDiagnostics(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = clientDiagnosticsSchema.parse(req.body);
+      const tenantId = (req.salonIds || [req.tenantId!])[0];
+      const result = await schedulingService.clientDiagnostics({
+        tenantId,
+        date: data.date,
+        startTime: data.startTime,
+        estimatedDuration: data.estimatedDuration,
+      });
+      res.json(result);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Validation error', message: error.errors[0].message });
+      }
+      next(error);
+    }
+  }
+
   async createAppointment(req: Request, res: Response, next: NextFunction) {
     try {
       const data = createAppointmentSchema.parse(req.body);
       const tenantId = resolveWriteTenantId(req, (req.body as any).tenantId);
+
       const appointment = await appointmentService.createAppointment(tenantId, req.userId!, data, false);
       res.status(201).json({ appointment });
     } catch (error: any) {

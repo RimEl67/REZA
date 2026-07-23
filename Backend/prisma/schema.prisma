@@ -189,6 +189,7 @@ model User {
   appointments Appointment[] @relation("AppointmentEmployee")
   createdAppointments Appointment[] @relation("AppointmentCreator")
   createdCashTransactions CashTransaction[] @relation("CashTransactionCreator")
+  serviceItems AppointmentServiceItem[] @relation("ServiceItemEmployee")
   notifications Notification[]
   ownedAccount Account? @relation("AccountOwner")
   
@@ -395,6 +396,10 @@ model Appointment {
   serviceId   String
   service     Service  @relation(fields: [serviceId], references: [id])
   
+  /// LEGACY: top-level employee for the entire appointment.
+  /// Kept for backward compatibility (stats, invoices, existing single-service appointments).
+  /// NEW FLOW: per-service employees are stored on AppointmentServiceItem.employeeId instead.
+  /// When creating via the `services[]` array, this field SHOULD be null.
   employeeId  String?
   employee    User?    @relation("AppointmentEmployee", fields: [employeeId], references: [id])
   
@@ -437,6 +442,9 @@ model AppointmentServiceItem {
 
   serviceId     String?
   service       Service?    @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+
+  employeeId    String?
+  employee      User?       @relation("ServiceItemEmployee", fields: [employeeId], references: [id])
 
   serviceName   String
   duration      Int
